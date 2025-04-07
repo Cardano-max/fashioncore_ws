@@ -93,8 +93,8 @@ user_results = {}  # Format: {phone_number: {'result_url': url}}
 
 class KlingAIClient:
     def __init__(self):
-        self.access_key = "7a3e661ac9f449e1a9416a9ad6aa7617"
-        self.secret_key = "528c39f046024bc284c724457380ec1a"
+        self.access_key = "b8afed7981f24e29855104ddf9d6df5f"
+        self.secret_key = "4543919766a74bb3bbcbb937dd252ff1"
         self.base_url = "https://api.klingai.com"
         self.logger = logging.getLogger(__name__)
     
