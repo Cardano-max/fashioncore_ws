@@ -1,0 +1,25 @@
+# Python
+.env
+__pycache__/
+*.pyc
+static/
+*.log
+venv/
+.python-version
+
+# Node
+node_modules/
+.next/
+frontend/node_modules/
+frontend/.next/
+*.node
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db 
