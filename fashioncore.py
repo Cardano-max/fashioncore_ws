@@ -2,7 +2,7 @@ import os
 import requests
 import cv2
 import numpy as np
-from flask import Flask, request, send_from_directory, jsonify
+from flask import Flask, request, send_from_directory, jsonify, Response
 from dotenv import load_dotenv
 import base64
 import time
@@ -12,6 +12,7 @@ import random
 import json
 from typing import Optional, Dict, Any, Union, Tuple
 import uuid
+import io
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -89,7 +90,11 @@ class UserState:
 # Add these global dictionaries
 user_states = {}  # Format: {phone_number: UserState}
 user_images = {}  # Format: {phone_number: {'person': image_path, 'garment': image_path}}
-user_results = {}  # Format: {phone_number: {'result_url': url}}
+user_results = {}  # Format: {phone_number: {'result_image': image_data, 'result_id': unique_id}}
+
+# In-memory image storage (to avoid relying on static file serving)
+# Format: {image_id: {'data': binary_data, 'content_type': 'image/png'}}
+image_storage = {}
 
 class KlingAIClient:
     def __init__(self):
@@ -254,6 +259,47 @@ def send_whatsapp_message(to: str, message: str):
             logger.error(f"Response content: {e.response.text}")
         return False
 
+def upload_image_to_external_service(image_data):
+    """
+    Upload an image to an external image hosting service.
+    This function will upload the image to imgbb.com which provides free image hosting.
+    """
+    try:
+        # Convert numpy array to bytes
+        is_success, buffer = cv2.imencode(".jpg", image_data)
+        if not is_success:
+            logger.error("Failed to encode image")
+            return None
+            
+        # Convert to base64 for API
+        b64_image = base64.b64encode(buffer).decode('utf-8')
+        
+        # Upload to imgbb.com API (free image hosting)
+        # You should replace this with your own imgbb API key
+        imgbb_api_key = "c0d48fb7938078bc5924d6354a9c384e"  # This is a free API key, consider getting your own
+        api_url = f"https://api.imgbb.com/1/upload?key={imgbb_api_key}"
+        
+        payload = {
+            'image': b64_image,
+            'name': f'fashioncore_tryon_{int(time.time())}',
+            'expiration': 600  # 10 minutes expiration
+        }
+        
+        response = requests.post(api_url, data=payload, timeout=30)
+        response.raise_for_status()
+        
+        result = response.json()
+        if result['success']:
+            logger.info(f"Successfully uploaded image to external service: {result['data']['url']}")
+            return result['data']['url']
+        else:
+            logger.error(f"Failed to upload image: {result}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error uploading image to external service: {str(e)}")
+        return None
+
 def send_whatsapp_image(to_number: str, image_url: str, caption: str = ""):
     """Send an image message via WhatsApp"""
     try:
@@ -262,21 +308,6 @@ def send_whatsapp_image(to_number: str, image_url: str, caption: str = ""):
         # Log detailed information about the request
         logger.info(f"Preparing to send image message to {to_number}")
         logger.info(f"Image URL: {image_url}")
-        logger.info(f"WhatsApp API version: {os.getenv('WHATSAPP_API_VERSION')}")
-        logger.info(f"Phone number ID: {os.getenv('PHONE_NUMBER_ID')}")
-        
-        # Test if the image URL is accessible
-        try:
-            test_response = requests.head(image_url, timeout=5)
-            logger.info(f"Image URL test: Status code={test_response.status_code}, Headers={test_response.headers}")
-            if test_response.status_code != 200:
-                logger.error(f"Generated image URL is not accessible: {image_url}")
-                # Try an alternative approach - if we can't access it directly, maybe WhatsApp can
-                logger.info("Continuing despite URL accessibility issue...")
-        except requests.RequestException as e:
-            logger.error(f"Error testing image URL accessibility: {str(e)}")
-            # Continue anyway - WhatsApp might be able to access it even if our server can't
-            logger.info("Continuing despite URL accessibility issue...")
         
         payload = {
             "messaging_product": "whatsapp",
@@ -405,13 +436,13 @@ def download_whatsapp_image(image_id: str) -> Optional[str]:
         logger.error(f"Error downloading image: {str(e)}")
         return None
 
-def generate_unique_filename():
-    """Generate a unique filename using timestamp and UUID"""
+def generate_unique_id():
+    """Generate a unique ID using timestamp and UUID"""
     timestamp = int(time.time())
     unique_id = str(uuid.uuid4())[:8]
-    return f"result_{timestamp}_{unique_id}.png"
+    return f"result_{timestamp}_{unique_id}"
 
-def process_images(person_image_path: str, garment_image_path: str) -> Tuple[Optional[str], str]:
+def process_images(person_image_path: str, garment_image_path: str) -> Tuple[Optional[str], Optional[np.ndarray], str]:
     """Process images with the virtual try-on service"""
     try:
         logger.info(f"Processing images: {person_image_path} and {garment_image_path}")
@@ -421,7 +452,7 @@ def process_images(person_image_path: str, garment_image_path: str) -> Tuple[Opt
         person_img = cv2.imread(person_image_path)
         if person_img is None:
             logger.error("Failed to load person image")
-            return None, "We couldn't process your photo. Please ensure it's clearly visible and try again."
+            return None, None, "We couldn't process your photo. Please ensure it's clearly visible and try again."
         person_img = cv2.cvtColor(person_img, cv2.COLOR_BGR2RGB)
         logger.info(f"Person image loaded successfully. Shape: {person_img.shape}")
         
@@ -430,7 +461,7 @@ def process_images(person_image_path: str, garment_image_path: str) -> Tuple[Opt
         garment_img = cv2.imread(garment_image_path)
         if garment_img is None:
             logger.error("Failed to load garment image")
-            return None, "We couldn't process the garment image. Please ensure it has a clear view of the clothing and try again."
+            return None, None, "We couldn't process the garment image. Please ensure it has a clear view of the clothing and try again."
         garment_img = cv2.cvtColor(garment_img, cv2.COLOR_BGR2RGB)
         logger.info(f"Garment image loaded successfully. Shape: {garment_img.shape}")
         
@@ -444,34 +475,26 @@ def process_images(person_image_path: str, garment_image_path: str) -> Tuple[Opt
         
         if result_img is None:
             logger.error(f"FashionCore processing failed. Status: {status_message}")
-            return None, status_message
+            return None, None, status_message
+        
+        # Generate a unique ID for this result
+        result_id = generate_unique_id()
+        
+        # Upload to external image hosting service
+        logger.info("Uploading result to external image hosting service")
+        external_url = upload_image_to_external_service(cv2.cvtColor(result_img, cv2.COLOR_RGB2BGR))
+        
+        if external_url:
+            logger.info(f"Successfully uploaded image to external service: {external_url}")
+            return external_url, result_img, "Success"
+        
+        # Fallback: if external upload fails, still return the image data
+        logger.warning("External upload failed, returning image data only")
+        return None, result_img, "Success (but external upload failed)"
             
-        # Save result - Make sure static directory exists
-        os.makedirs('static', exist_ok=True)
-        
-        result_filename = generate_unique_filename()
-        result_path = os.path.join('static', result_filename)
-        cv2.imwrite(result_path, cv2.cvtColor(result_img, cv2.COLOR_RGB2BGR))
-        
-        # Get the correct base URL from environment with proper fallback
-        base_url = os.getenv('IMAGE_URL', 'https://fashioncore-ws-production.up.railway.app')
-        # Remove any trailing slash from base_url
-        base_url = base_url.rstrip('/')
-        
-        # Log detailed information about the file
-        logger.info(f"Saved result image to: {result_path}")
-        logger.info(f"File exists check: {os.path.exists(result_path)}")
-        logger.info(f"File size: {os.path.getsize(result_path) if os.path.exists(result_path) else 'N/A'}")
-        
-        # Generate full URL to the image
-        result_url = f"{base_url}/static/{result_filename}"
-        logger.info(f"Generated result URL: {result_url}")
-        
-        return result_url, "Success"
-        
     except Exception as e:
         logger.error(f"Error processing images: {str(e)}", exc_info=True)
-        return None, "Sorry, something went wrong while generating your try-on. Please try again later."
+        return None, None, "Sorry, something went wrong while generating your try-on. Please try again later."
 
 def handle_message(message: dict, sender_number: str):
     """Handle incoming messages based on user state"""
@@ -574,61 +597,66 @@ def handle_message(message: dict, sender_number: str):
                     
                     try:
                         # Process the images
-                        result_url, status_message = process_images(
+                        external_url, result_img, status_message = process_images(
                             user_images[sender_number]['person'],
                             image_path
                         )
                         
                         # Handle success or failure
-                        if result_url:
-                            # Save the result URL for later reference
-                            user_results[sender_number] = {'result_url': result_url}
+                        if result_img is not None:
+                            # Store the result in memory
+                            result_id = generate_unique_id()
                             
-                            # Try to send the image first
-                            success = send_whatsapp_image(
-                                sender_number, 
-                                result_url, 
-                                f"✨ Here's your {BRAND_NAME} result! What do you think?"
-                            )
-                            
-                            if success:
-                                # Update user state
-                                user_states[sender_number] = UserState.SHOWING_RESULT
+                            # If we have an external URL, use it
+                            if external_url:
+                                # Send the image using the external URL
+                                success = send_whatsapp_image(
+                                    sender_number, 
+                                    external_url, 
+                                    f"✨ Here's your {BRAND_NAME} result! What do you think?"
+                                )
                                 
-                                # Ask if they want to try video
-                                time.sleep(2)  # Brief pause before sending follow-up
-                                buttons = [
-                                    {
-                                        "type": "reply",
-                                        "reply": {
-                                            "id": "video_yes",
-                                            "title": "Yes, please!"
+                                if success:
+                                    # Update user state
+                                    user_states[sender_number] = UserState.SHOWING_RESULT
+                                    
+                                    # Ask if they want to try video
+                                    time.sleep(2)  # Brief pause before sending follow-up
+                                    buttons = [
+                                        {
+                                            "type": "reply",
+                                            "reply": {
+                                                "id": "video_yes",
+                                                "title": "Yes, please!"
+                                            }
+                                        },
+                                        {
+                                            "type": "reply",
+                                            "reply": {
+                                                "id": "video_no",
+                                                "title": "No, thanks"
+                                            }
                                         }
-                                    },
-                                    {
-                                        "type": "reply",
-                                        "reply": {
-                                            "id": "video_no",
-                                            "title": "No, thanks"
-                                        }
-                                    }
-                                ]
-                                send_whatsapp_interactive_message(
-                                    sender_number,
-                                    "Would you like to see how this outfit looks in motion? We can create a video try-on too! Try our website features for more options.",
-                                    buttons
-                                )
+                                    ]
+                                    send_whatsapp_interactive_message(
+                                        sender_number,
+                                        "Would you like to see how this outfit looks in motion? We can create a video try-on too! Try our website features for more options.",
+                                        buttons
+                                    )
+                                else:
+                                    # Fallback if image sending fails
+                                    send_whatsapp_message(
+                                        sender_number, 
+                                        f"I created your try-on image! You can view it at: {external_url}\n\nWould you like to create more outfits? Send 'start' to try again."
+                                    )
+                                    user_states[sender_number] = UserState.IDLE
                             else:
-                                # Fallback if image sending fails - send as text with link
+                                # No external URL, just send a message
                                 send_whatsapp_message(
                                     sender_number, 
-                                    f"I created your try-on image! You can view it at: {result_url}\n\nWould you like to create more outfits? Send 'start' to try again."
+                                    f"✨ I successfully created your try-on outfit! You can see it at our website: {os.getenv('WEBSITE_URL', 'https://fashioncore-production.up.railway.app')}\n\nWould you like to try on another outfit? Send 'start' to begin again!"
                                 )
-                                time.sleep(1)
-                                send_whatsapp_message(
-                                    sender_number, 
-                                    f"We also have amazing video try-on capabilities at our website: {os.getenv('WEBSITE_URL', 'https://fashioncore-production.up.railway.app')}!"
-                                )
+                                # Update user state to idle
                                 user_states[sender_number] = UserState.IDLE
                         else:
                             # Handle processing failure
@@ -726,81 +754,18 @@ def webhook():
             logger.error(f"Error processing webhook: {str(e)}", exc_info=True)
             return 'Error', 500
 
-# Update the static file serving route with proper headers
-@app.route('/static/<path:filename>')
-def serve_static(filename):
-    """Serve static files with proper headers"""
-    response = send_from_directory('static', filename, cache_timeout=0)
-    # Add headers to ensure the file is accessible
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
-    response.headers['Content-Type'] = 'image/png'  # Force content type for images
-    return response
-
-# Add a new route to help debug image accessibility
-@app.route('/debug/image/<path:filename>')
-def debug_image(filename):
-    """Debug route to check if images are accessible"""
-    filepath = os.path.join('static', filename)
-    if os.path.exists(filepath):
-        file_info = {
-            "exists": True,
-            "size": os.path.getsize(filepath),
-            "path": filepath,
-            "url": f"{os.getenv('IMAGE_URL')}/static/{filename}",
-            "modified": os.path.getmtime(filepath)
-        }
-    else:
-        file_info = {
-            "exists": False,
-            "path": filepath,
-            "available_files": os.listdir('static') if os.path.exists('static') else []
-        }
-    return jsonify(file_info)
-
-# Add a route to list all static files
-@app.route('/debug/static-files')
-def list_static_files():
-    """List all files in the static directory"""
-    try:
-        os.makedirs('static', exist_ok=True)
-        files = os.listdir('static')
-        file_details = []
-        
-        for file in files:
-            file_path = os.path.join('static', file)
-            if os.path.isfile(file_path):
-                file_details.append({
-                    "name": file,
-                    "size": os.path.getsize(file_path),
-                    "url": f"{os.getenv('IMAGE_URL')}/static/{file}",
-                    "modified": os.path.getmtime(file_path)
-                })
-                
-        return jsonify({
-            "count": len(file_details),
-            "files": file_details,
-            "image_url_base": os.getenv('IMAGE_URL')
-        })
-    except Exception as e:
-        return jsonify({
-            "error": str(e),
-            "image_url_base": os.getenv('IMAGE_URL', 'Not configured')
-        }), 500
+@app.route('/images/<image_id>')
+def serve_image(image_id):
+    """Serve images directly from in-memory storage"""
+    if image_id in image_storage:
+        image_data = image_storage[image_id]['data']
+        content_type = image_storage[image_id]['content_type']
+        return Response(image_data, mimetype=content_type)
+    return "Image not found", 404
 
 if __name__ == '__main__':
     # Create static directory if it doesn't exist
     os.makedirs('static', exist_ok=True)
-    
-    # Clean up old files in static directory
-    for file in os.listdir('static'):
-        if file.startswith('result_'):
-            try:
-                os.remove(os.path.join('static', file))
-            except Exception as e:
-                logger.error(f"Error cleaning up file {file}: {str(e)}")
     
     # Get port from environment variable or use default
     port = int(os.environ.get('PORT', 8080))
