@@ -2,7 +2,7 @@ import os
 import requests
 import cv2
 import numpy as np
-from flask import Flask, request, send_from_directory, jsonify, Response
+from flask import Flask, request, send_from_directory, jsonify
 from dotenv import load_dotenv
 import base64
 import time
@@ -12,7 +12,6 @@ import random
 import json
 from typing import Optional, Dict, Any, Union, Tuple
 import uuid
-import io
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -90,11 +89,10 @@ class UserState:
 # Add these global dictionaries
 user_states = {}  # Format: {phone_number: UserState}
 user_images = {}  # Format: {phone_number: {'person': image_path, 'garment': image_path}}
-user_results = {}  # Format: {phone_number: {'result_image': image_data, 'result_id': unique_id}}
+user_results = {}  # Format: {phone_number: {'result_url': url}}
 
-# In-memory image storage (to avoid relying on static file serving)
-# Format: {image_id: {'data': binary_data, 'content_type': 'image/png'}}
-image_storage = {}
+# Store the Kling AI result URL globally
+kling_result_url = None
 
 class KlingAIClient:
     def __init__(self):
@@ -121,7 +119,7 @@ class KlingAIClient:
             'Authorization': f"Bearer {self._generate_jwt_token()}"
         }
     
-    def try_on(self, person_img: np.ndarray, garment_img: np.ndarray, seed: int) -> Tuple[np.ndarray, str]:
+    def try_on(self, person_img: np.ndarray, garment_img: np.ndarray, seed: int) -> Tuple[np.ndarray, str, str]:
         """
         Use the Kling AI's Virtual Try-on API to generate a try-on image.
         
@@ -131,8 +129,11 @@ class KlingAIClient:
             seed: Random seed for generation
             
         Returns:
-            The resulting image and status message
+            The resulting image, original URL, and status message
         """
+        global kling_result_url
+        kling_result_url = None
+        
         if person_img is None or garment_img is None:
             raise ValueError("Empty image")
             
@@ -164,12 +165,12 @@ class KlingAIClient:
             if response.status_code == 429:
                 error_msg = "Sorry, our service is currently at capacity. Please try again in a few minutes."
                 self.logger.error(f"API rate limit exceeded: {response.text}")
-                return None, error_msg
+                return None, None, error_msg
                 
             if response.status_code != 200:
                 error_msg = f"Error: API returned status code {response.status_code}"
                 self.logger.error(f"API error: {response.text}")
-                return None, error_msg
+                return None, None, error_msg
             
             result = response.json()
             task_id = result['data']['task_id']
@@ -198,37 +199,40 @@ class KlingAIClient:
                         output_url = result['data']['task_result']['images'][0]['url']
                         self.logger.info(f"Try-on successful! Result URL: {output_url}")
                         
+                        # Store the result URL globally
+                        kling_result_url = output_url
+                        
                         img_response = requests.get(output_url)
                         img_response.raise_for_status()
                         
                         nparr = np.frombuffer(img_response.content, np.uint8)
                         result_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                         result_img = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
-                        return result_img, "Success"
+                        return result_img, output_url, "Success"
                     elif status == "failed":
                         error_msg = f"Sorry, we couldn't create the try-on image. {result['data']['task_status_msg']}"
                         self.logger.error(f"Task failed: {result['data']['task_status_msg']}")
-                        return None, error_msg
+                        return None, None, error_msg
                     else:
                         self.logger.info(f"Task status: {status}. Waiting...")
                         
                 except requests.exceptions.ReadTimeout:
                     self.logger.warning(f"Timeout on attempt {attempt+1}/12. Retrying...")
                     if attempt == 11:
-                        return None, "Sorry, the try-on is taking longer than expected. Please try again."
+                        return None, None, "Sorry, the try-on is taking longer than expected. Please try again."
                         
                 time.sleep(1)
                 
-            return None, "The try-on is taking too long. Please try again later."
+            return None, None, "The try-on is taking too long. Please try again later."
             
         except requests.exceptions.RequestException as e:
             error_msg = f"Sorry, we're having trouble connecting to our service. Please try again later."
             self.logger.error(f"API error: {str(e)}")
-            return None, error_msg
+            return None, None, error_msg
         except Exception as e:
             error_msg = f"Sorry, something went wrong. Please try again later."
             self.logger.error(f"Unexpected error: {str(e)}")
-            return None, error_msg
+            return None, None, error_msg
 
 def send_whatsapp_message(to: str, message: str):
     """Send a text message via WhatsApp"""
@@ -259,47 +263,6 @@ def send_whatsapp_message(to: str, message: str):
             logger.error(f"Response content: {e.response.text}")
         return False
 
-def upload_image_to_external_service(image_data):
-    """
-    Upload an image to an external image hosting service.
-    This function will upload the image to imgbb.com which provides free image hosting.
-    """
-    try:
-        # Convert numpy array to bytes
-        is_success, buffer = cv2.imencode(".jpg", image_data)
-        if not is_success:
-            logger.error("Failed to encode image")
-            return None
-            
-        # Convert to base64 for API
-        b64_image = base64.b64encode(buffer).decode('utf-8')
-        
-        # Upload to imgbb.com API (free image hosting)
-        # You should replace this with your own imgbb API key
-        imgbb_api_key = "c0d48fb7938078bc5924d6354a9c384e"  # This is a free API key, consider getting your own
-        api_url = f"https://api.imgbb.com/1/upload?key={imgbb_api_key}"
-        
-        payload = {
-            'image': b64_image,
-            'name': f'fashioncore_tryon_{int(time.time())}',
-            'expiration': 600  # 10 minutes expiration
-        }
-        
-        response = requests.post(api_url, data=payload, timeout=30)
-        response.raise_for_status()
-        
-        result = response.json()
-        if result['success']:
-            logger.info(f"Successfully uploaded image to external service: {result['data']['url']}")
-            return result['data']['url']
-        else:
-            logger.error(f"Failed to upload image: {result}")
-            return None
-            
-    except Exception as e:
-        logger.error(f"Error uploading image to external service: {str(e)}")
-        return None
-
 def send_whatsapp_image(to_number: str, image_url: str, caption: str = ""):
     """Send an image message via WhatsApp"""
     try:
@@ -325,7 +288,7 @@ def send_whatsapp_image(to_number: str, image_url: str, caption: str = ""):
             "Content-Type": "application/json"
         }
         
-        logger.info(f"Sending image to {to_number} with payload: {json.dumps(payload)}")
+        logger.info(f"Sending image to {to_number}")
         
         response = requests.post(url, json=payload, headers=headers)
         logger.info(f"WhatsApp API response status: {response.status_code}")
@@ -436,13 +399,13 @@ def download_whatsapp_image(image_id: str) -> Optional[str]:
         logger.error(f"Error downloading image: {str(e)}")
         return None
 
-def generate_unique_id():
-    """Generate a unique ID using timestamp and UUID"""
+def generate_unique_filename():
+    """Generate a unique filename using timestamp and UUID"""
     timestamp = int(time.time())
     unique_id = str(uuid.uuid4())[:8]
-    return f"result_{timestamp}_{unique_id}"
+    return f"result_{timestamp}_{unique_id}.png"
 
-def process_images(person_image_path: str, garment_image_path: str) -> Tuple[Optional[str], Optional[np.ndarray], str]:
+def process_images(person_image_path: str, garment_image_path: str) -> Tuple[Optional[str], str]:
     """Process images with the virtual try-on service"""
     try:
         logger.info(f"Processing images: {person_image_path} and {garment_image_path}")
@@ -452,7 +415,7 @@ def process_images(person_image_path: str, garment_image_path: str) -> Tuple[Opt
         person_img = cv2.imread(person_image_path)
         if person_img is None:
             logger.error("Failed to load person image")
-            return None, None, "We couldn't process your photo. Please ensure it's clearly visible and try again."
+            return None, "We couldn't process your photo. Please ensure it's clearly visible and try again."
         person_img = cv2.cvtColor(person_img, cv2.COLOR_BGR2RGB)
         logger.info(f"Person image loaded successfully. Shape: {person_img.shape}")
         
@@ -461,7 +424,7 @@ def process_images(person_image_path: str, garment_image_path: str) -> Tuple[Opt
         garment_img = cv2.imread(garment_image_path)
         if garment_img is None:
             logger.error("Failed to load garment image")
-            return None, None, "We couldn't process the garment image. Please ensure it has a clear view of the clothing and try again."
+            return None, "We couldn't process the garment image. Please ensure it has a clear view of the clothing and try again."
         garment_img = cv2.cvtColor(garment_img, cv2.COLOR_BGR2RGB)
         logger.info(f"Garment image loaded successfully. Shape: {garment_img.shape}")
         
@@ -471,30 +434,23 @@ def process_images(person_image_path: str, garment_image_path: str) -> Tuple[Opt
         
         # Process images
         logger.info("Calling FashionCore Magic Try-on service")
-        result_img, status_message = client.try_on(person_img, garment_img, random.randint(0, MAX_SEED))
+        result_img, direct_url, status_message = client.try_on(person_img, garment_img, random.randint(0, MAX_SEED))
         
         if result_img is None:
             logger.error(f"FashionCore processing failed. Status: {status_message}")
-            return None, None, status_message
-        
-        # Generate a unique ID for this result
-        result_id = generate_unique_id()
-        
-        # Upload to external image hosting service
-        logger.info("Uploading result to external image hosting service")
-        external_url = upload_image_to_external_service(cv2.cvtColor(result_img, cv2.COLOR_RGB2BGR))
-        
-        if external_url:
-            logger.info(f"Successfully uploaded image to external service: {external_url}")
-            return external_url, result_img, "Success"
-        
-        # Fallback: if external upload fails, still return the image data
-        logger.warning("External upload failed, returning image data only")
-        return None, result_img, "Success (but external upload failed)"
+            return None, status_message
             
+        # Return the direct URL from Kling AI - this is most reliable
+        if direct_url:
+            logger.info(f"Using direct URL from Kling AI: {direct_url}")
+            return direct_url, "Success"
+            
+        logger.error("No direct URL available from Kling AI")
+        return None, "Sorry, we couldn't generate a shareable image URL. Please try again."
+        
     except Exception as e:
         logger.error(f"Error processing images: {str(e)}", exc_info=True)
-        return None, None, "Sorry, something went wrong while generating your try-on. Please try again later."
+        return None, "Sorry, something went wrong while generating your try-on. Please try again later."
 
 def handle_message(message: dict, sender_number: str):
     """Handle incoming messages based on user state"""
@@ -597,66 +553,56 @@ def handle_message(message: dict, sender_number: str):
                     
                     try:
                         # Process the images
-                        external_url, result_img, status_message = process_images(
+                        direct_url, status_message = process_images(
                             user_images[sender_number]['person'],
                             image_path
                         )
                         
                         # Handle success or failure
-                        if result_img is not None:
-                            # Store the result in memory
-                            result_id = generate_unique_id()
+                        if direct_url:
+                            # Save the result URL for later reference
+                            user_results[sender_number] = {'result_url': direct_url}
                             
-                            # If we have an external URL, use it
-                            if external_url:
-                                # Send the image using the external URL
-                                success = send_whatsapp_image(
-                                    sender_number, 
-                                    external_url, 
-                                    f"✨ Here's your {BRAND_NAME} result! What do you think?"
-                                )
+                            # Send the image using the direct URL from Kling AI
+                            success = send_whatsapp_image(
+                                sender_number, 
+                                direct_url, 
+                                f"✨ Here's your {BRAND_NAME} result! What do you think?"
+                            )
+                            
+                            if success:
+                                # Update user state
+                                user_states[sender_number] = UserState.SHOWING_RESULT
                                 
-                                if success:
-                                    # Update user state
-                                    user_states[sender_number] = UserState.SHOWING_RESULT
-                                    
-                                    # Ask if they want to try video
-                                    time.sleep(2)  # Brief pause before sending follow-up
-                                    buttons = [
-                                        {
-                                            "type": "reply",
-                                            "reply": {
-                                                "id": "video_yes",
-                                                "title": "Yes, please!"
-                                            }
-                                        },
-                                        {
-                                            "type": "reply",
-                                            "reply": {
-                                                "id": "video_no",
-                                                "title": "No, thanks"
-                                            }
+                                # Ask if they want to try video
+                                time.sleep(2)  # Brief pause before sending follow-up
+                                buttons = [
+                                    {
+                                        "type": "reply",
+                                        "reply": {
+                                            "id": "video_yes",
+                                            "title": "Yes, please!"
                                         }
-                                    ]
-                                    send_whatsapp_interactive_message(
-                                        sender_number,
-                                        "Would you like to see how this outfit looks in motion? We can create a video try-on too! Try our website features for more options.",
-                                        buttons
-                                    )
-                                else:
-                                    # Fallback if image sending fails
-                                    send_whatsapp_message(
-                                        sender_number, 
-                                        f"I created your try-on image! You can view it at: {external_url}\n\nWould you like to create more outfits? Send 'start' to try again."
-                                    )
-                                    user_states[sender_number] = UserState.IDLE
+                                    },
+                                    {
+                                        "type": "reply",
+                                        "reply": {
+                                            "id": "video_no",
+                                            "title": "No, thanks"
+                                        }
+                                    }
+                                ]
+                                send_whatsapp_interactive_message(
+                                    sender_number,
+                                    "Would you like to see how this outfit looks in motion? We can create a video try-on too! Try our website features for more options.",
+                                    buttons
+                                )
                             else:
-                                # No external URL, just send a message
+                                # Fallback if image sending fails - send as text with link
                                 send_whatsapp_message(
                                     sender_number, 
-                                    f"✨ I successfully created your try-on outfit! You can see it at our website: {os.getenv('WEBSITE_URL', 'https://fashioncore-production.up.railway.app')}\n\nWould you like to try on another outfit? Send 'start' to begin again!"
+                                    f"I created your try-on image! You can view it at: {direct_url}\n\nWould you like to create more outfits? Send 'start' to try again."
                                 )
-                                # Update user state to idle
                                 user_states[sender_number] = UserState.IDLE
                         else:
                             # Handle processing failure
@@ -753,15 +699,6 @@ def webhook():
         except Exception as e:
             logger.error(f"Error processing webhook: {str(e)}", exc_info=True)
             return 'Error', 500
-
-@app.route('/images/<image_id>')
-def serve_image(image_id):
-    """Serve images directly from in-memory storage"""
-    if image_id in image_storage:
-        image_data = image_storage[image_id]['data']
-        content_type = image_storage[image_id]['content_type']
-        return Response(image_data, mimetype=content_type)
-    return "Image not found", 404
 
 if __name__ == '__main__':
     # Create static directory if it doesn't exist
