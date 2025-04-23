@@ -2,7 +2,15 @@ import os
 import requests
 import cv2
 import numpy as np
-from flask import Flask, request, send_from_directory, jsonify
+from flask import Flask, request, send_from_directory, jsonify, redirect, url_for
+from flask_sqlalchemy import SQLAlchemy
+from flask_admin import Admin
+from flask_admin.contrib.sqla import ModelView
+from flask_migrate import Migrate
+from flask_wtf.csrf import CSRFProtect
+from sqlalchemy import desc
+from datetime import datetime
+from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 import base64
 import time
@@ -70,6 +78,90 @@ app = Flask(__name__)
 
 # Configure static file serving
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
+# Configure database
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'fashioncore-default-secret-key')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///fashioncore.db')
+# Fix for PostgreSQL URL on Railway
+if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
+    app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace('postgres://', 'postgresql://', 1)
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Setup CSRF protection
+csrf = CSRFProtect(app)
+
+# Initialize database
+db = SQLAlchemy(app)
+migrate = Migrate(app, db)
+
+# Database models
+class TryOn(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    phone_number = db.Column(db.String(20), nullable=False)
+    person_image_path = db.Column(db.String(255))
+    garment_image_path = db.Column(db.String(255))
+    result_image_url = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def __repr__(self):
+        return f'<TryOn {self.id} - {self.phone_number}>'
+
+class AdminUser(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(128), nullable=False)
+    
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+        
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+        
+    def __repr__(self):
+        return f'<AdminUser {self.username}>'
+
+# Admin views with authentication
+class ProtectedModelView(ModelView):
+    def is_accessible(self):
+        # For simplicity, we're not implementing full auth flow here
+        # In production, you should use Flask-Login or similar
+        return True
+        
+class TryOnModelView(ProtectedModelView):
+    column_searchable_list = ['phone_number']
+    column_filters = ['created_at', 'phone_number']
+    column_default_sort = ('created_at', True)
+    
+    def _person_image_formatter(view, context, model, name):
+        if model.person_image_path:
+            if os.path.isfile(model.person_image_path):
+                return f'<img src="/static/uploads/{os.path.basename(model.person_image_path)}" width="100">'
+            else:
+                return 'Image not available'
+        return ''
+        
+    def _garment_image_formatter(view, context, model, name):
+        if model.garment_image_path:
+            if os.path.isfile(model.garment_image_path):
+                return f'<img src="/static/uploads/{os.path.basename(model.garment_image_path)}" width="100">'
+            else:
+                return 'Image not available'
+        return ''
+        
+    def _result_image_formatter(view, context, model, name):
+        if model.result_image_url:
+            return f'<img src="{model.result_image_url}" width="100">'
+        return ''
+        
+    column_formatters = {
+        'person_image_path': _person_image_formatter,
+        'garment_image_path': _garment_image_formatter,
+        'result_image_url': _result_image_formatter
+    }
+
+# Initialize Flask Admin
+admin = Admin(app, name='FashionCore Admin', template_mode='bootstrap3')
+admin.add_view(TryOnModelView(TryOn, db.session))
 
 # Constants
 MAX_SEED = 999999
@@ -563,6 +655,46 @@ def handle_message(message: dict, sender_number: str):
                             # Save the result URL for later reference
                             user_results[sender_number] = {'result_url': direct_url}
                             
+                            # Save to database
+                            try:
+                                # Create uploads directory if it doesn't exist
+                                uploads_dir = os.path.join(app.static_folder, 'uploads')
+                                os.makedirs(uploads_dir, exist_ok=True)
+                                
+                                # Save person image to permanent storage
+                                person_img_path = user_images[sender_number]['person']
+                                person_img_filename = f"person_{int(time.time())}_{uuid.uuid4()}.jpg"
+                                person_img_dest = os.path.join(uploads_dir, person_img_filename)
+                                
+                                # Copy person image to static folder
+                                if os.path.exists(person_img_path):
+                                    with open(person_img_path, 'rb') as src_file:
+                                        with open(person_img_dest, 'wb') as dest_file:
+                                            dest_file.write(src_file.read())
+                                
+                                # Save garment image to permanent storage
+                                garment_img_filename = f"garment_{int(time.time())}_{uuid.uuid4()}.jpg"
+                                garment_img_dest = os.path.join(uploads_dir, garment_img_filename)
+                                
+                                # Copy garment image to static folder
+                                if os.path.exists(image_path):
+                                    with open(image_path, 'rb') as src_file:
+                                        with open(garment_img_dest, 'wb') as dest_file:
+                                            dest_file.write(src_file.read())
+                                
+                                # Create new TryOn record
+                                try_on = TryOn(
+                                    phone_number=sender_number,
+                                    person_image_path=person_img_dest,
+                                    garment_image_path=garment_img_dest,
+                                    result_image_url=direct_url
+                                )
+                                db.session.add(try_on)
+                                db.session.commit()
+                                logger.info(f"Successfully saved try-on data for {sender_number}")
+                            except Exception as db_error:
+                                logger.error(f"Database error: {str(db_error)}", exc_info=True)
+                                
                             # Send the image using the direct URL from Kling AI
                             success = send_whatsapp_image(
                                 sender_number, 
@@ -700,9 +832,151 @@ def webhook():
             logger.error(f"Error processing webhook: {str(e)}", exc_info=True)
             return 'Error', 500
 
+# Add admin routes
+@app.route('/admin/setup', methods=['GET'])
+def admin_setup():
+    # Check if an admin user already exists
+    admin_exists = AdminUser.query.first() is not None
+    
+    if not admin_exists:
+        # Create a default admin user
+        default_username = 'admin'
+        default_password = 'fashioncore2024'  # In production, use a secure random password
+        
+        admin_user = AdminUser(username=default_username)
+        admin_user.set_password(default_password)
+        
+        db.session.add(admin_user)
+        db.session.commit()
+        
+        return f"Admin user created. Username: {default_username}, Password: {default_password}", 200
+    else:
+        return "Admin user already exists.", 200
+
+@app.route('/admin/stats', methods=['GET'])
+def admin_stats():
+    # Get basic stats
+    total_tryons = TryOn.query.count()
+    unique_users = db.session.query(TryOn.phone_number.distinct()).count()
+    recent_tryons = TryOn.query.order_by(desc(TryOn.created_at)).limit(5).all()
+    
+    # Create a simple HTML response - in production, use templates
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>FashionCore Stats</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 20px; }}
+            .stats {{ display: flex; gap: 20px; margin-bottom: 20px; }}
+            .stat-card {{ border: 1px solid #ddd; padding: 20px; border-radius: 5px; flex: 1; }}
+            table {{ width: 100%; border-collapse: collapse; }}
+            th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
+            th {{ background-color: #f2f2f2; }}
+        </style>
+    </head>
+    <body>
+        <h1>FashionCore WhatsApp Try-On Stats</h1>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <h2>Total Try-Ons</h2>
+                <p>{total_tryons}</p>
+            </div>
+            <div class="stat-card">
+                <h2>Unique Users</h2>
+                <p>{unique_users}</p>
+            </div>
+        </div>
+        
+        <h2>Recent Try-Ons</h2>
+        <table>
+            <tr>
+                <th>Phone Number</th>
+                <th>Date</th>
+                <th>Actions</th>
+            </tr>
+    """
+    
+    for tryon in recent_tryons:
+        html += f"""
+            <tr>
+                <td>{tryon.phone_number}</td>
+                <td>{tryon.created_at.strftime('%Y-%m-%d %H:%M:%S')}</td>
+                <td><a href="/admin/view/{tryon.id}">View Details</a></td>
+            </tr>
+        """
+    
+    html += """
+        </table>
+        <p><a href="/admin/">Go to Full Admin Dashboard</a></p>
+    </body>
+    </html>
+    """
+    
+    return html
+
+@app.route('/admin/view/<int:tryon_id>', methods=['GET'])
+def view_tryon(tryon_id):
+    # Get the try-on record
+    tryon = TryOn.query.get_or_404(tryon_id)
+    
+    # Create a simple HTML response - in production, use templates
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>FashionCore Try-On Details</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 20px; }}
+            .image-container {{ display: flex; gap: 20px; margin: 20px 0; }}
+            .image-card {{ border: 1px solid #ddd; padding: 10px; border-radius: 5px; }}
+            img {{ max-width: 300px; max-height: 400px; }}
+            .details {{ margin-bottom: 20px; }}
+        </style>
+    </head>
+    <body>
+        <h1>Try-On Details</h1>
+        
+        <div class="details">
+            <p><strong>Phone Number:</strong> {tryon.phone_number}</p>
+            <p><strong>Date:</strong> {tryon.created_at.strftime('%Y-%m-%d %H:%M:%S')}</p>
+        </div>
+        
+        <div class="image-container">
+            <div class="image-card">
+                <h3>Person Image</h3>
+                {'<img src="/static/uploads/' + os.path.basename(tryon.person_image_path) + '">' if tryon.person_image_path and os.path.exists(tryon.person_image_path) else 'Image not available'}
+            </div>
+            <div class="image-card">
+                <h3>Garment Image</h3>
+                {'<img src="/static/uploads/' + os.path.basename(tryon.garment_image_path) + '">' if tryon.garment_image_path and os.path.exists(tryon.garment_image_path) else 'Image not available'}
+            </div>
+            <div class="image-card">
+                <h3>Result Image</h3>
+                {'<img src="' + tryon.result_image_url + '">' if tryon.result_image_url else 'Image not available'}
+            </div>
+        </div>
+        
+        <p><a href="/admin/stats">Back to Stats</a> | <a href="/admin/">Go to Admin Dashboard</a></p>
+    </body>
+    </html>
+    """
+    
+    return html
+
+@app.route('/admin', methods=['GET'])
+def admin_redirect():
+    return redirect('/admin/')
+
 if __name__ == '__main__':
     # Create static directory if it doesn't exist
     os.makedirs('static', exist_ok=True)
+    os.makedirs(os.path.join('static', 'uploads'), exist_ok=True)
+    
+    # Create database tables
+    with app.app_context():
+        db.create_all()
     
     # Get port from environment variable or use default
     port = int(os.environ.get('PORT', 8080))
