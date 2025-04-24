@@ -953,7 +953,7 @@ def create_template_files():
     </head>
     <body>
         <div class="container">
-            <h1>FashionCore Try-on Admin Panel</h1>
+            <h1>TryOnTrend Try-on Admin Panel</h1>
             <a href="/download-csv" class="button">Download All Data (CSV)</a>
             
             <h2>Try-on Attempts</h2>
