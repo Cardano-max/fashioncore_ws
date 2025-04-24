@@ -2,15 +2,7 @@ import os
 import requests
 import cv2
 import numpy as np
-from flask import Flask, request, send_from_directory, jsonify, redirect, url_for
-from flask_sqlalchemy import SQLAlchemy
-from flask_admin import Admin
-from flask_admin.contrib.sqla import ModelView
-from flask_migrate import Migrate
-from flask_wtf.csrf import CSRFProtect
-from sqlalchemy import desc
-from datetime import datetime
-from werkzeug.security import generate_password_hash, check_password_hash
+from flask import Flask, request, send_from_directory, jsonify, render_template, Response
 from dotenv import load_dotenv
 import base64
 import time
@@ -18,6 +10,10 @@ import jwt
 import logging
 import random
 import json
+import sqlite3
+import csv
+import io
+from datetime import datetime
 from typing import Optional, Dict, Any, Union, Tuple
 import uuid
 from logging.handlers import RotatingFileHandler
@@ -79,89 +75,34 @@ app = Flask(__name__)
 # Configure static file serving
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
-# Configure database
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'fashioncore-default-secret-key')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///fashioncore.db')
-# Fix for PostgreSQL URL on Railway
-if app.config['SQLALCHEMY_DATABASE_URI'].startswith('postgres://'):
-    app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace('postgres://', 'postgresql://', 1)
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# Setup CSRF protection
-csrf = CSRFProtect(app)
-
 # Initialize database
-db = SQLAlchemy(app)
-migrate = Migrate(app, db)
+DB_PATH = BASE_DIR / 'tryon_data.db'
 
-# Database models
-class TryOn(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    phone_number = db.Column(db.String(20), nullable=False)
-    person_image_path = db.Column(db.String(255))
-    garment_image_path = db.Column(db.String(255))
-    result_image_url = db.Column(db.String(255))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+def init_db():
+    """Initialize the SQLite database for storing try-on data."""
+    logger.info(f"Initializing database at {DB_PATH}")
     
-    def __repr__(self):
-        return f'<TryOn {self.id} - {self.phone_number}>'
-
-class AdminUser(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    password_hash = db.Column(db.String(128), nullable=False)
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
     
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
-        
-    def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
-        
-    def __repr__(self):
-        return f'<AdminUser {self.username}>'
-
-# Admin views with authentication
-class ProtectedModelView(ModelView):
-    def is_accessible(self):
-        # For simplicity, we're not implementing full auth flow here
-        # In production, you should use Flask-Login or similar
-        return True
-        
-class TryOnModelView(ProtectedModelView):
-    column_searchable_list = ['phone_number']
-    column_filters = ['created_at', 'phone_number']
-    column_default_sort = ('created_at', True)
+    # Create table if it doesn't exist
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS tryon_attempts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        phone_number TEXT NOT NULL,
+        person_image_url TEXT,
+        garment_image_url TEXT,
+        result_image_url TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
     
-    def _person_image_formatter(view, context, model, name):
-        if model.person_image_path:
-            if os.path.isfile(model.person_image_path):
-                return f'<img src="/static/uploads/{os.path.basename(model.person_image_path)}" width="100">'
-            else:
-                return 'Image not available'
-        return ''
-        
-    def _garment_image_formatter(view, context, model, name):
-        if model.garment_image_path:
-            if os.path.isfile(model.garment_image_path):
-                return f'<img src="/static/uploads/{os.path.basename(model.garment_image_path)}" width="100">'
-            else:
-                return 'Image not available'
-        return ''
-        
-    def _result_image_formatter(view, context, model, name):
-        if model.result_image_url:
-            return f'<img src="{model.result_image_url}" width="100">'
-        return ''
-        
-    column_formatters = {
-        'person_image_path': _person_image_formatter,
-        'garment_image_path': _garment_image_formatter,
-        'result_image_url': _result_image_formatter
-    }
+    conn.commit()
+    conn.close()
+    logger.info("Database initialized successfully")
 
-# Initialize Flask Admin
-admin = Admin(app, name='FashionCore Admin', template_mode='bootstrap3')
-admin.add_view(TryOnModelView(TryOn, db.session))
+# Call init_db at startup
+init_db()
 
 # Constants
 MAX_SEED = 999999
@@ -325,6 +266,26 @@ class KlingAIClient:
             error_msg = f"Sorry, something went wrong. Please try again later."
             self.logger.error(f"Unexpected error: {str(e)}")
             return None, None, error_msg
+
+def log_tryon_attempt(phone_number, person_image_url, garment_image_url, result_image_url):
+    """Log a try-on attempt to the database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        c.execute('''
+        INSERT INTO tryon_attempts 
+        (phone_number, person_image_url, garment_image_url, result_image_url)
+        VALUES (?, ?, ?, ?)
+        ''', (phone_number, person_image_url, garment_image_url, result_image_url))
+        
+        conn.commit()
+        conn.close()
+        logger.info(f"Logged try-on attempt for {phone_number} to database")
+        return True
+    except Exception as e:
+        logger.error(f"Error logging try-on attempt to database: {str(e)}")
+        return False
 
 def send_whatsapp_message(to: str, message: str):
     """Send a text message via WhatsApp"""
@@ -611,7 +572,14 @@ def handle_message(message: dict, sender_number: str):
                     
                 image_path = download_whatsapp_image(image_id)
                 if image_path:
-                    user_images[sender_number] = {'person': image_path}
+                    # Get the WhatsApp media URL for the image
+                    person_image_url = f"https://graph.facebook.com/{os.getenv('WHATSAPP_API_VERSION')}/{image_id}"
+                    
+                    user_images[sender_number] = {
+                        'person': image_path,
+                        'person_url': person_image_url
+                    }
+                    
                     user_states[sender_number] = UserState.WAITING_FOR_GARMENT
                     send_whatsapp_message(
                         sender_number, 
@@ -641,6 +609,9 @@ def handle_message(message: dict, sender_number: str):
                         f"✨ Creating your outfit with {BRAND_NAME} magic! This should take about 15-20 seconds..."
                     )
                     
+                    # Get the WhatsApp media URL for the garment image
+                    garment_image_url = f"https://graph.facebook.com/{os.getenv('WHATSAPP_API_VERSION')}/{image_id}"
+                    
                     user_states[sender_number] = UserState.PROCESSING
                     
                     try:
@@ -655,46 +626,14 @@ def handle_message(message: dict, sender_number: str):
                             # Save the result URL for later reference
                             user_results[sender_number] = {'result_url': direct_url}
                             
-                            # Save to database
-                            try:
-                                # Create uploads directory if it doesn't exist
-                                uploads_dir = os.path.join(app.static_folder, 'uploads')
-                                os.makedirs(uploads_dir, exist_ok=True)
-                                
-                                # Save person image to permanent storage
-                                person_img_path = user_images[sender_number]['person']
-                                person_img_filename = f"person_{int(time.time())}_{uuid.uuid4()}.jpg"
-                                person_img_dest = os.path.join(uploads_dir, person_img_filename)
-                                
-                                # Copy person image to static folder
-                                if os.path.exists(person_img_path):
-                                    with open(person_img_path, 'rb') as src_file:
-                                        with open(person_img_dest, 'wb') as dest_file:
-                                            dest_file.write(src_file.read())
-                                
-                                # Save garment image to permanent storage
-                                garment_img_filename = f"garment_{int(time.time())}_{uuid.uuid4()}.jpg"
-                                garment_img_dest = os.path.join(uploads_dir, garment_img_filename)
-                                
-                                # Copy garment image to static folder
-                                if os.path.exists(image_path):
-                                    with open(image_path, 'rb') as src_file:
-                                        with open(garment_img_dest, 'wb') as dest_file:
-                                            dest_file.write(src_file.read())
-                                
-                                # Create new TryOn record
-                                try_on = TryOn(
-                                    phone_number=sender_number,
-                                    person_image_path=person_img_dest,
-                                    garment_image_path=garment_img_dest,
-                                    result_image_url=direct_url
-                                )
-                                db.session.add(try_on)
-                                db.session.commit()
-                                logger.info(f"Successfully saved try-on data for {sender_number}")
-                            except Exception as db_error:
-                                logger.error(f"Database error: {str(db_error)}", exc_info=True)
-                                
+                            # Log this try-on attempt to the database
+                            log_tryon_attempt(
+                                sender_number,
+                                user_images[sender_number].get('person_url', ''),
+                                garment_image_url,
+                                direct_url
+                            )
+                            
                             # Send the image using the direct URL from Kling AI
                             success = send_whatsapp_image(
                                 sender_number, 
@@ -791,6 +730,89 @@ def index():
 def health():
     return jsonify({"status": "ok", "time": time.time()}), 200
 
+@app.route('/admin')
+def admin_panel():
+    """Simple admin panel to view try-on data"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        
+        # Get all try-on attempts, order by most recent first
+        c.execute('SELECT * FROM tryon_attempts ORDER BY timestamp DESC')
+        attempts = c.fetchall()
+        
+        # Convert to list of dicts for template
+        attempts_data = []
+        for attempt in attempts:
+            attempt_dict = dict(attempt)
+            # Format timestamp for better readability
+            if attempt_dict['timestamp']:
+                try:
+                    timestamp = datetime.strptime(attempt_dict['timestamp'], '%Y-%m-%d %H:%M:%S')
+                    attempt_dict['formatted_time'] = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+                except:
+                    attempt_dict['formatted_time'] = attempt_dict['timestamp']
+            else:
+                attempt_dict['formatted_time'] = 'Unknown'
+                
+            attempts_data.append(attempt_dict)
+        
+        conn.close()
+        
+        # Render admin template
+        return render_template('admin.html', attempts=attempts_data)
+    except Exception as e:
+        logger.error(f"Error rendering admin page: {str(e)}")
+        return f"Error rendering admin page: {str(e)}", 500
+
+@app.route('/download-csv')
+def download_csv():
+    """Generate and download CSV of all try-on data"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        
+        # Get all try-on attempts
+        c.execute('SELECT * FROM tryon_attempts ORDER BY timestamp DESC')
+        attempts = c.fetchall()
+        
+        conn.close()
+        
+        # Create CSV in memory
+        csv_data = io.StringIO()
+        csv_writer = csv.writer(csv_data)
+        
+        # Write headers
+        csv_writer.writerow(['ID', 'Phone Number', 'Person Image URL', 'Garment Image URL', 
+                            'Result Image URL', 'Timestamp'])
+        
+        # Write data rows
+        for attempt in attempts:
+            csv_writer.writerow([
+                attempt['id'],
+                attempt['phone_number'],
+                attempt['person_image_url'],
+                attempt['garment_image_url'],
+                attempt['result_image_url'],
+                attempt['timestamp']
+            ])
+        
+        # Prepare response
+        output = csv_data.getvalue()
+        csv_data.close()
+        
+        return Response(
+            output,
+            mimetype="text/csv",
+            headers={"Content-disposition": 
+                     f"attachment; filename=tryon_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
+        )
+    except Exception as e:
+        logger.error(f"Error generating CSV: {str(e)}")
+        return f"Error generating CSV: {str(e)}", 500
+
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
@@ -832,151 +854,199 @@ def webhook():
             logger.error(f"Error processing webhook: {str(e)}", exc_info=True)
             return 'Error', 500
 
-# Add admin routes
-@app.route('/admin/setup', methods=['GET'])
-def admin_setup():
-    # Check if an admin user already exists
-    admin_exists = AdminUser.query.first() is not None
+# Create a templates directory and admin.html template
+def create_template_files():
+    """Create necessary template files for the admin panel."""
+    # Create templates directory if it doesn't exist
+    os.makedirs('templates', exist_ok=True)
     
-    if not admin_exists:
-        # Create a default admin user
-        default_username = 'admin'
-        default_password = 'fashioncore2024'  # In production, use a secure random password
-        
-        admin_user = AdminUser(username=default_username)
-        admin_user.set_password(default_password)
-        
-        db.session.add(admin_user)
-        db.session.commit()
-        
-        return f"Admin user created. Username: {default_username}, Password: {default_password}", 200
-    else:
-        return "Admin user already exists.", 200
-
-@app.route('/admin/stats', methods=['GET'])
-def admin_stats():
-    # Get basic stats
-    total_tryons = TryOn.query.count()
-    unique_users = db.session.query(TryOn.phone_number.distinct()).count()
-    recent_tryons = TryOn.query.order_by(desc(TryOn.created_at)).limit(5).all()
-    
-    # Create a simple HTML response - in production, use templates
-    html = f"""
+    # Create admin.html template
+    admin_template = """
     <!DOCTYPE html>
     <html>
     <head>
-        <title>FashionCore Stats</title>
+        <title>FashionCore Try-on Admin</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-            body {{ font-family: Arial, sans-serif; margin: 20px; }}
-            .stats {{ display: flex; gap: 20px; margin-bottom: 20px; }}
-            .stat-card {{ border: 1px solid #ddd; padding: 20px; border-radius: 5px; flex: 1; }}
-            table {{ width: 100%; border-collapse: collapse; }}
-            th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
-            th {{ background-color: #f2f2f2; }}
+            body {
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 20px;
+            }
+            h1 {
+                color: #333;
+            }
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+            }
+            .button {
+                display: inline-block;
+                background-color: #4CAF50;
+                color: white;
+                padding: 10px 15px;
+                text-decoration: none;
+                border-radius: 4px;
+                margin-bottom: 20px;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            th, td {
+                border: 1px solid #ddd;
+                padding: 8px;
+                text-align: left;
+            }
+            th {
+                background-color: #f2f2f2;
+                position: sticky;
+                top: 0;
+            }
+            tr:nth-child(even) {
+                background-color: #f9f9f9;
+            }
+            .image-preview {
+                max-width: 100px;
+                max-height: 100px;
+                cursor: pointer;
+            }
+            .modal {
+                display: none;
+                position: fixed;
+                z-index: 1;
+                padding-top: 100px;
+                left: 0;
+                top: 0;
+                width: 100%;
+                height: 100%;
+                overflow: auto;
+                background-color: rgba(0,0,0,0.9);
+            }
+            .modal-content {
+                margin: auto;
+                display: block;
+                max-width: 80%;
+                max-height: 80%;
+            }
+            .close {
+                position: absolute;
+                top: 15px;
+                right: 35px;
+                color: #f1f1f1;
+                font-size: 40px;
+                font-weight: bold;
+                transition: 0.3s;
+            }
+            .close:hover, .close:focus {
+                color: #bbb;
+                text-decoration: none;
+                cursor: pointer;
+            }
+            @media only screen and (max-width: 700px) {
+                table {
+                    display: block;
+                    overflow-x: auto;
+                }
+            }
         </style>
     </head>
     <body>
-        <h1>FashionCore WhatsApp Try-On Stats</h1>
-        
-        <div class="stats">
-            <div class="stat-card">
-                <h2>Total Try-Ons</h2>
-                <p>{total_tryons}</p>
-            </div>
-            <div class="stat-card">
-                <h2>Unique Users</h2>
-                <p>{unique_users}</p>
-            </div>
+        <div class="container">
+            <h1>FashionCore Try-on Admin Panel</h1>
+            <a href="/download-csv" class="button">Download All Data (CSV)</a>
+            
+            <h2>Try-on Attempts</h2>
+            
+            {% if attempts %}
+                <table>
+                    <tr>
+                        <th>ID</th>
+                        <th>Phone Number</th>
+                        <th>Time</th>
+                        <th>Person Image</th>
+                        <th>Garment Image</th>
+                        <th>Result Image</th>
+                    </tr>
+                    {% for attempt in attempts %}
+                        <tr>
+                            <td>{{ attempt.id }}</td>
+                            <td>{{ attempt.phone_number }}</td>
+                            <td>{{ attempt.formatted_time }}</td>
+                            <td>
+                                {% if attempt.person_image_url %}
+                                    <a href="{{ attempt.person_image_url }}" target="_blank">View</a>
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if attempt.garment_image_url %}
+                                    <a href="{{ attempt.garment_image_url }}" target="_blank">View</a>
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if attempt.result_image_url %}
+                                    <a href="{{ attempt.result_image_url }}" target="_blank">
+                                        <img src="{{ attempt.result_image_url }}" alt="Result" class="image-preview" onclick="showImage(this.src)">
+                                    </a>
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </table>
+            {% else %}
+                <p>No try-on attempts recorded yet.</p>
+            {% endif %}
         </div>
         
-        <h2>Recent Try-Ons</h2>
-        <table>
-            <tr>
-                <th>Phone Number</th>
-                <th>Date</th>
-                <th>Actions</th>
-            </tr>
-    """
-    
-    for tryon in recent_tryons:
-        html += f"""
-            <tr>
-                <td>{tryon.phone_number}</td>
-                <td>{tryon.created_at.strftime('%Y-%m-%d %H:%M:%S')}</td>
-                <td><a href="/admin/view/{tryon.id}">View Details</a></td>
-            </tr>
-        """
-    
-    html += """
-        </table>
-        <p><a href="/admin/">Go to Full Admin Dashboard</a></p>
+        <!-- Image Modal -->
+        <div id="imageModal" class="modal">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <img class="modal-content" id="modalImg">
+        </div>
+        
+        <script>
+            // Image modal functionality
+            function showImage(src) {
+                var modal = document.getElementById("imageModal");
+                var modalImg = document.getElementById("modalImg");
+                modal.style.display = "block";
+                modalImg.src = src;
+                return false; // Prevent default link behavior
+            }
+            
+            function closeModal() {
+                document.getElementById("imageModal").style.display = "none";
+            }
+            
+            // Close modal when clicking outside of image
+            window.onclick = function(event) {
+                var modal = document.getElementById("imageModal");
+                if (event.target == modal) {
+                    modal.style.display = "none";
+                }
+            }
+        </script>
     </body>
     </html>
     """
     
-    return html
-
-@app.route('/admin/view/<int:tryon_id>', methods=['GET'])
-def view_tryon(tryon_id):
-    # Get the try-on record
-    tryon = TryOn.query.get_or_404(tryon_id)
+    with open('templates/admin.html', 'w') as f:
+        f.write(admin_template)
     
-    # Create a simple HTML response - in production, use templates
-    html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>FashionCore Try-On Details</title>
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 20px; }}
-            .image-container {{ display: flex; gap: 20px; margin: 20px 0; }}
-            .image-card {{ border: 1px solid #ddd; padding: 10px; border-radius: 5px; }}
-            img {{ max-width: 300px; max-height: 400px; }}
-            .details {{ margin-bottom: 20px; }}
-        </style>
-    </head>
-    <body>
-        <h1>Try-On Details</h1>
-        
-        <div class="details">
-            <p><strong>Phone Number:</strong> {tryon.phone_number}</p>
-            <p><strong>Date:</strong> {tryon.created_at.strftime('%Y-%m-%d %H:%M:%S')}</p>
-        </div>
-        
-        <div class="image-container">
-            <div class="image-card">
-                <h3>Person Image</h3>
-                {'<img src="/static/uploads/' + os.path.basename(tryon.person_image_path) + '">' if tryon.person_image_path and os.path.exists(tryon.person_image_path) else 'Image not available'}
-            </div>
-            <div class="image-card">
-                <h3>Garment Image</h3>
-                {'<img src="/static/uploads/' + os.path.basename(tryon.garment_image_path) + '">' if tryon.garment_image_path and os.path.exists(tryon.garment_image_path) else 'Image not available'}
-            </div>
-            <div class="image-card">
-                <h3>Result Image</h3>
-                {'<img src="' + tryon.result_image_url + '">' if tryon.result_image_url else 'Image not available'}
-            </div>
-        </div>
-        
-        <p><a href="/admin/stats">Back to Stats</a> | <a href="/admin/">Go to Admin Dashboard</a></p>
-    </body>
-    </html>
-    """
-    
-    return html
+    logger.info("Created admin template files")
 
-@app.route('/admin', methods=['GET'])
-def admin_redirect():
-    return redirect('/admin/')
+# Create template files on startup
+create_template_files()
 
 if __name__ == '__main__':
     # Create static directory if it doesn't exist
     os.makedirs('static', exist_ok=True)
-    os.makedirs(os.path.join('static', 'uploads'), exist_ok=True)
-    
-    # Create database tables
-    with app.app_context():
-        db.create_all()
     
     # Get port from environment variable or use default
     port = int(os.environ.get('PORT', 8080))
