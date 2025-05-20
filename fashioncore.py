@@ -129,8 +129,8 @@ kling_result_url = None
 
 class KlingAIClient:
     def __init__(self):
-        self.access_key = "b8afed7981f24e29855104ddf9d6df5f"
-        self.secret_key = "4543919766a74bb3bbcbb937dd252ff1"
+        self.access_key = "1175cde8b5014c2c96c7b00b87f1b7f6"
+        self.secret_key = "122dd2118b444c749f50ce1b548293a8"
         self.base_url = "https://api.klingai.com"
         self.logger = logging.getLogger(__name__)
     
