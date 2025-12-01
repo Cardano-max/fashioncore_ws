@@ -42,13 +42,16 @@ ELEVENZA_AUTH_TOKEN=U2FsdGVkX1/e9ymvz3iAqRt4SA7LgwfStvq6pJdz4WP6yhSMsicFgT7duBMd
 ELEVENZA_PHONE_NUMBER=919725791777
 
 # Kling AI Configuration
-KLING_ACCESS_KEY=1175cde8b5014c2c96c7b00b87f1b7f6
-KLING_SECRET_KEY=122dd2118b444c749f50ce1b548293a8
+KLING_ACCESS_KEY=ALMrJQFypk3HCYMnkNNfa8NJCB9YPeP
+KLING_SECRET_KEY=pNYB39FT3kbGEtaCCM3Qr8PkHHBppdC
 
 # App Configuration
 IMAGE_URL=https://fashioncore-ws-production.up.railway.app
 WEBSITE_URL=https://fashioncore-production.up.railway.app
-VERIFY_TOKEN=1122"""
+VERIFY_TOKEN=1122
+
+# Test Mode - Set to True to avoid using Kling AI credits
+TEST_MODE=True"""
 
     env_path = BASE_DIR / '.env'
     env_path.write_text(env_content)
@@ -125,6 +128,14 @@ MAX_SEED = 999999
 BRAND_NAME = "FashionCore Magic Try-on"
 BOT_NAME = "FashionCore Assistant"
 
+# Test mode flag - if True, will not call actual Kling AI API (saves credits)
+TEST_MODE = os.getenv('TEST_MODE', 'True').lower() == 'true'
+
+if TEST_MODE:
+    logger.warning("=" * 60)
+    logger.warning("🧪 TEST MODE ENABLED - Kling AI API calls will be mocked")
+    logger.warning("=" * 60)
+
 # Add these state constants
 class UserState:
     IDLE = "idle"
@@ -142,8 +153,8 @@ garment_selections = {}  # Format: {session_id: garment_image_url}
 
 class KlingAIClient:
     def __init__(self):
-        self.access_key = os.getenv('KLING_ACCESS_KEY', '1175cde8b5014c2c96c7b00b87f1b7f6')
-        self.secret_key = os.getenv('KLING_SECRET_KEY', '122dd2118b444c749f50ce1b548293a8')
+        self.access_key = os.getenv('KLING_ACCESS_KEY', 'ALMrJQFypk3HCYMnkNNfa8NJCB9YPeP')
+        self.secret_key = os.getenv('KLING_SECRET_KEY', 'pNYB39FT3kbGEtaCCM3Qr8PkHHBppdC')
         self.base_url = "https://api.klingai.com"
         self.logger = logging.getLogger(__name__)
 
@@ -179,6 +190,22 @@ class KlingAIClient:
         """
         if person_img is None or garment_img is None:
             raise ValueError("Empty image")
+
+        # TEST MODE: Return mock result without calling API
+        if TEST_MODE:
+            self.logger.info("🧪 TEST MODE: Mocking Kling AI response (no API call)")
+            self.logger.info("⏱️  Simulating 3 second processing time...")
+            time.sleep(3)  # Simulate processing time
+
+            # Use a sample result image URL
+            mock_result_url = "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=800&h=1000&fit=crop"
+
+            self.logger.info(f"✅ Mock try-on successful! Result URL: {mock_result_url}")
+
+            # Create a simple mock result image (blend person and garment)
+            result_img = cv2.addWeighted(person_img, 0.6, garment_img, 0.4, 0)
+
+            return result_img, mock_result_url, "Success (TEST MODE)"
 
         # Encode images
         encoded_person = cv2.imencode('.jpg', cv2.cvtColor(person_img, cv2.COLOR_RGB2BGR))[1]
