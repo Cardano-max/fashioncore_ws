@@ -147,9 +147,16 @@ class UserState:
 user_states = {}  # Format: {phone_number: UserState}
 user_images = {}  # Format: {phone_number: {'person': image_path, 'garment': garment_url}}
 user_results = {}  # Format: {phone_number: {'result_url': url}}
+user_last_activity = {}  # Format: {phone_number: timestamp}
 
 # Store garment selections from landing page
 garment_selections = {}  # Format: {session_id: garment_image_url}
+
+# Trigger words that bot responds to
+TRIGGER_WORDS = ['start', 'hi', 'hello', 'hey', 'begin', 'tryon', 'try on', 'help']
+
+# Session timeout in seconds (10 minutes)
+SESSION_TIMEOUT = 600
 
 class KlingAIClient:
     def __init__(self):
@@ -494,15 +501,60 @@ def process_images(person_image_path: str, garment_image_path: str) -> Tuple[Opt
         logger.error(f"Error processing images: {str(e)}", exc_info=True)
         return None, "Sorry, something went wrong while generating your try-on. Please try again later."
 
+def check_session_timeout(sender_number: str) -> bool:
+    """Check if user session has timed out"""
+    if sender_number in user_last_activity:
+        elapsed = time.time() - user_last_activity[sender_number]
+        if elapsed > SESSION_TIMEOUT:
+            logger.info(f"Session timeout for {sender_number}")
+            reset_user_session(sender_number)
+            return True
+    return False
+
+def reset_user_session(sender_number: str):
+    """Reset user session completely"""
+    logger.info(f"Resetting session for {sender_number}")
+    user_states.pop(sender_number, None)
+    user_images.pop(sender_number, None)
+    user_results.pop(sender_number, None)
+    user_last_activity.pop(sender_number, None)
+
+def update_user_activity(sender_number: str):
+    """Update last activity timestamp for user"""
+    user_last_activity[sender_number] = time.time()
+
+def is_trigger_word(text: str) -> bool:
+    """Check if text contains any trigger word"""
+    text_lower = text.lower().strip()
+    # Check for exact match or if trigger word is in the text
+    for trigger in TRIGGER_WORDS:
+        if trigger in text_lower:
+            return True
+    # Also check for start_ pattern
+    if text_lower.startswith('start_'):
+        return True
+    return False
+
 def handle_message(message: dict, sender_number: str):
     """Handle incoming messages from 11za webhook"""
     try:
+        # Check for session timeout
+        check_session_timeout(sender_number)
+
+        # Update last activity
+        update_user_activity(sender_number)
+
         current_state = user_states.get(sender_number, UserState.IDLE)
         message_type = message.get('type', 'text')
         logger.info(f"Handling message from {sender_number}. Type: {message_type}, State: {current_state}")
 
         if message_type == 'text':
             text = message.get('text', '').lower().strip()
+
+            # Ignore empty messages
+            if not text:
+                logger.info(f"Ignoring empty message from {sender_number}")
+                return
 
             # Check if this is a start command with garment ID
             if text.startswith('start_'):
@@ -516,26 +568,59 @@ def handle_message(message: dict, sender_number: str):
                     logger.info(f"Found garment URL: {garment_url}")
 
                 user_states[sender_number] = UserState.WAITING_FOR_PERSON
+                update_user_activity(sender_number)
                 elevenza_client.send_text_message(
                     sender_number,
                     f"👋 Welcome to {BRAND_NAME}! Let's create a stunning virtual outfit for you.\n\nPlease send a full-body photo of yourself standing straight against a plain background."
                 )
-            elif text == 'start':
-                user_states[sender_number] = UserState.WAITING_FOR_PERSON
+                return
+
+            # In IDLE state, only respond to trigger words
+            if current_state == UserState.IDLE:
+                if is_trigger_word(text):
+                    user_states[sender_number] = UserState.WAITING_FOR_PERSON
+                    update_user_activity(sender_number)
+                    elevenza_client.send_text_message(
+                        sender_number,
+                        f"👋 Welcome to {BRAND_NAME}! Send a full-body photo to begin."
+                    )
+                else:
+                    # Ignore non-trigger messages in IDLE state
+                    logger.info(f"Ignoring non-trigger message in IDLE state from {sender_number}: {text}")
+                return
+
+            # In WAITING_FOR_PERSON state, remind to send image
+            elif current_state == UserState.WAITING_FOR_PERSON:
                 elevenza_client.send_text_message(
                     sender_number,
-                    f"👋 Welcome to {BRAND_NAME}! Send a full-body photo to begin."
+                    "Please send a full-body photo of yourself to continue. 📸"
                 )
+                return
+
+            # In PROCESSING state, tell user to wait
+            elif current_state == UserState.PROCESSING:
+                elevenza_client.send_text_message(
+                    sender_number,
+                    "Please wait, we're creating your try-on... ⏳"
+                )
+                return
+
+            # In SHOWING_RESULT state, check if user wants to start again
             elif current_state == UserState.SHOWING_RESULT:
-                elevenza_client.send_text_message(
-                    sender_number,
-                    "Would you like to try on another outfit? Send 'start' to begin again!"
-                )
-            else:
-                elevenza_client.send_text_message(
-                    sender_number,
-                    f"👋 Welcome to {BRAND_NAME}! Send 'start' to begin the virtual try-on experience."
-                )
+                if is_trigger_word(text):
+                    # Reset and start new session
+                    reset_user_session(sender_number)
+                    user_states[sender_number] = UserState.WAITING_FOR_PERSON
+                    update_user_activity(sender_number)
+                    elevenza_client.send_text_message(
+                        sender_number,
+                        f"👋 Great! Send a full-body photo to try another outfit."
+                    )
+                else:
+                    # After showing result, auto-reset and go to IDLE
+                    logger.info(f"Auto-resetting session after result shown for {sender_number}")
+                    reset_user_session(sender_number)
+                return
 
         elif message_type == 'image':
             if current_state == UserState.WAITING_FOR_PERSON:
@@ -602,25 +687,30 @@ def handle_message(message: dict, sender_number: str):
                                         sender_number,
                                         "Love it? Want to try another outfit? Send 'start' to try again! 😊"
                                     )
+                                    # Auto-reset session after 5 seconds
+                                    time.sleep(5)
+                                    logger.info(f"Auto-resetting session for {sender_number} after result")
+                                    reset_user_session(sender_number)
                                 else:
                                     elevenza_client.send_text_message(
                                         sender_number,
                                         f"I created your try-on image! View it at: {direct_url}\n\nWant to try more? Send 'start'!"
                                     )
-                                    user_states[sender_number] = UserState.IDLE
+                                    # Auto-reset session
+                                    reset_user_session(sender_number)
                             else:
                                 elevenza_client.send_text_message(
                                     sender_number,
                                     f"Sorry, {status_message} Please try again by sending 'start'."
                                 )
-                                user_states[sender_number] = UserState.IDLE
+                                reset_user_session(sender_number)
                         except Exception as e:
                             logger.error(f"Error in processing: {str(e)}", exc_info=True)
                             elevenza_client.send_text_message(
                                 sender_number,
                                 "Sorry, something went wrong while creating your try-on. Please try again by sending 'start'."
                             )
-                            user_states[sender_number] = UserState.IDLE
+                            reset_user_session(sender_number)
                         finally:
                             # Clean up temporary files
                             try:
@@ -641,10 +731,17 @@ def handle_message(message: dict, sender_number: str):
                         "I'm having trouble downloading your image. Please try sending a different photo."
                     )
             else:
-                elevenza_client.send_text_message(
-                    sender_number,
-                    f"Send 'start' to begin the {BRAND_NAME} experience!"
-                )
+                # Image sent in wrong state, ignore
+                logger.info(f"Ignoring image in state {current_state} from {sender_number}")
+                if current_state == UserState.IDLE:
+                    elevenza_client.send_text_message(
+                        sender_number,
+                        f"Send 'start' to begin the {BRAND_NAME} experience!"
+                    )
+
+        else:
+            # Ignore other message types (status, reactions, etc.)
+            logger.info(f"Ignoring message type '{message_type}' from {sender_number}")
 
     except Exception as e:
         logger.error(f"Error handling message: {str(e)}", exc_info=True)
@@ -653,7 +750,7 @@ def handle_message(message: dict, sender_number: str):
                 sender_number,
                 "Sorry, something went wrong. Please try again by sending 'start'."
             )
-            user_states[sender_number] = UserState.IDLE
+            reset_user_session(sender_number)
         except:
             logger.error("Failed to send error message to user")
 
