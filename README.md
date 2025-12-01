@@ -12,7 +12,7 @@
 - **Admin Dashboard**: Track all try-on attempts and user interactions
 - **Database Logging**: SQLite database with CSV export capability
 - **TEST_MODE**: Test full flow without AI charges
-- **Production Ready**: Deploy to Koyeb free tier (no card required!)
+- **Production Ready**: Deploy to Glitch - 100% free (no card required!)
 
 ## 🚀 Quick Start
 
@@ -21,7 +21,7 @@
 - Python 3.8+
 - 11za WhatsApp Business account
 - Kling AI API credentials (provided)
-- Koyeb account (for deployment - **no credit card required!**)
+- Glitch account (for deployment - **100% free, no credit card!**)
 
 ### Local Development
 
@@ -140,58 +140,65 @@ PORT=8080
 ### 11za Webhook Setup
 
 1. Go to 11za Dashboard → Settings → Webhooks
-2. Set webhook URL: `https://your-app.koyeb.app/webhook` (or your platform URL)
+2. Set webhook URL: `https://your-app.glitch.me/webhook` (or your platform URL)
 3. Set verify token: `1122`
 4. Enable events: Incoming messages, Images, Text
 
 ## 🚢 Deployment
 
-### Deploy to Koyeb (Recommended - No Card Required!)
+### Deploy to Glitch (Recommended - 100% Free, No Card!)
 
-**Quick Start**: See [QUICKSTART_KOYEB.md](./QUICKSTART_KOYEB.md) for 5-minute setup
+**Quick Start**: See [QUICKSTART_GLITCH.md](./QUICKSTART_GLITCH.md) for 5-minute setup
 
-**Full Guide**: See [KOYEB_DEPLOY.md](./KOYEB_DEPLOY.md) for complete instructions
+**Full Guide**: See [GLITCH_DEPLOY.md](./GLITCH_DEPLOY.md) for complete instructions
 
 #### Quick Steps:
 
-1. **Sign up at Koyeb**: https://www.koyeb.com/ (no card required!)
-2. **Create App** → Select GitHub → Choose this repository
-3. **Configure**: Use Docker builder, set environment variables
-4. **Deploy**: Koyeb builds and deploys automatically
-5. **Configure Webhook**: Update 11za with your Koyeb URL
+1. **Sign up at Glitch**: https://glitch.com/ (**no card required!** ✅)
+2. **Import from GitHub** → Paste repository URL
+3. **Set environment variables** in `.env` file
+4. **Get your URL**: `https://your-app.glitch.me`
+5. **Configure Webhook**: Update 11za with your Glitch URL
 
 ```bash
-# Or push to auto-deploy
+# Update locally and sync to Glitch
 git add .
 git commit -m "Deploy virtual try-on bot"
 git push origin claude/virtual-tryon-chat-flow-01DVtLNUfjUwbaKMEDnrZrQM
+# Then: Tools → Import from GitHub in Glitch
 ```
 
-Koyeb will automatically:
-- Build using `Dockerfile`
-- Install dependencies
-- Deploy with no sleep/wake delays ✅
+Glitch features:
+- ✅ **100% free** - no credit card ever required
+- ✅ Auto-installs from `requirements.txt`
+- ✅ Edit code in browser or sync from GitHub
+- ⚠️ Sleeps after 5 min inactivity (5s wake time)
 
-### Alternative Platforms
+### Alternative Platforms (All Require Credit Card)
 
-- **Render**: See [RENDER_DEPLOY.md](./RENDER_DEPLOY.md) (requires card)
-- **Railway**: See [RAILWAY_DEPLOY.md](./RAILWAY_DEPLOY.md) (requires card)
+- **Koyeb**: See [KOYEB_DEPLOY.md](./KOYEB_DEPLOY.md) ⚠️ *Requires card verification*
+- **Render**: See [RENDER_DEPLOY.md](./RENDER_DEPLOY.md) ⚠️ *Requires card verification*
+- **Railway**: See [RAILWAY_DEPLOY.md](./RAILWAY_DEPLOY.md) ⚠️ *Requires card verification*
+
+**Note**: Glitch is currently the only platform that doesn't require a credit card for free hosting.
 
 ### Post-Deployment
 
-1. **Set environment variables** in Koyeb dashboard (especially `ELEVENZA_AUTH_TOKEN`)
-2. **Configure 11za webhook** with your Koyeb URL
-3. **Test health check**: `https://your-app.koyeb.app/health`
-4. **Test landing page**: `https://your-app.koyeb.app/`
+1. **Set environment variables** in Glitch `.env` file (especially `ELEVENZA_AUTH_TOKEN`)
+2. **Configure 11za webhook** with your Glitch URL
+3. **Test health check**: `https://your-app.glitch.me/health`
+4. **Test landing page**: `https://your-app.glitch.me/`
 5. **Test WhatsApp flow**: Send "start" to your WhatsApp number
+6. **(Optional)** Set up UptimeRobot to keep app awake
 
 ## 📖 Documentation
 
 ### Deployment Guides
-- **[QUICKSTART_KOYEB.md](./QUICKSTART_KOYEB.md)**: 5-minute Koyeb deployment (no card!)
-- **[KOYEB_DEPLOY.md](./KOYEB_DEPLOY.md)**: Complete Koyeb deployment guide
-- **[RENDER_DEPLOY.md](./RENDER_DEPLOY.md)**: Render.com deployment guide
-- **[RAILWAY_DEPLOY.md](./RAILWAY_DEPLOY.md)**: Railway deployment guide
+- **[QUICKSTART_GLITCH.md](./QUICKSTART_GLITCH.md)**: ⭐ 5-minute Glitch deployment (no card!)
+- **[GLITCH_DEPLOY.md](./GLITCH_DEPLOY.md)**: ⭐ Complete Glitch deployment guide
+- **[KOYEB_DEPLOY.md](./KOYEB_DEPLOY.md)**: Koyeb deployment (requires card)
+- **[RENDER_DEPLOY.md](./RENDER_DEPLOY.md)**: Render deployment (requires card)
+- **[RAILWAY_DEPLOY.md](./RAILWAY_DEPLOY.md)**: Railway deployment (requires card)
 - **[DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)**: Complete feature documentation
 
 ### Setup & Testing
@@ -208,26 +215,26 @@ Koyeb will automatically:
 python test_webhook.py
 
 # Test production
-python test_webhook.py https://your-app.railway.app
+python test_webhook.py https://your-app.glitch.me
 ```
 
 ### Manual Testing
 
 1. **Health Check**:
    ```bash
-   curl https://your-app.koyeb.app/health
+   curl https://your-app.glitch.me/health
    ```
 
 2. **Webhook Verification**:
    ```bash
-   curl "https://your-app.koyeb.app/webhook?hub.mode=subscribe&hub.verify_token=1122&hub.challenge=test"
+   curl "https://your-app.glitch.me/webhook?hub.mode=subscribe&hub.verify_token=1122&hub.challenge=test"
    ```
 
 3. **Landing Page**:
-   Open browser to: `https://your-app.koyeb.app/`
+   Open browser to: `https://your-app.glitch.me/`
 
 4. **Admin Dashboard**:
-   Open browser to: `https://your-app.koyeb.app/admin`
+   Open browser to: `https://your-app.glitch.me/admin`
 
 ## 🎨 Customization
 
@@ -270,7 +277,7 @@ def product_page(product_id):
 1. Verify webhook URL is publicly accessible
 2. Check verify token matches
 3. Test with `test_webhook.py`
-4. Check deployment platform logs (Koyeb Dashboard → Logs)
+4. Check deployment platform logs (Glitch: click "Logs" button)
 
 ### Kling AI Errors
 
@@ -286,8 +293,8 @@ See [INTEGRATION_NOTES.md](./INTEGRATION_NOTES.md) for detailed troubleshooting.
 ### View Logs
 
 ```bash
-# Koyeb Dashboard → Logs tab
-# Real-time logs with filtering
+# Glitch: Click "Logs" button in editor
+# Real-time logs with auto-scroll
 
 # Local development logs
 tail -f app.log
@@ -301,7 +308,7 @@ sqlite3 tryon_data.db "SELECT COUNT(*) as total_attempts FROM tryon_attempts"
 
 ### Admin Dashboard
 
-Access: `https://your-app.koyeb.app/admin`
+Access: `https://your-app.glitch.me/admin`
 
 Features:
 - View all try-on attempts
@@ -338,11 +345,11 @@ Proprietary - All rights reserved
 
 ## 💬 Support
 
-- **Quick Start**: [QUICKSTART_KOYEB.md](./QUICKSTART_KOYEB.md) - Deploy in 5 minutes!
+- **Quick Start**: [QUICKSTART_GLITCH.md](./QUICKSTART_GLITCH.md) - Deploy in 5 minutes (no card!)
 - **Setup Help**: [SETUP_GUIDE.md](./SETUP_GUIDE.md)
 - **API Details**: [INTEGRATION_NOTES.md](./INTEGRATION_NOTES.md)
-- **Deployment**: [KOYEB_DEPLOY.md](./KOYEB_DEPLOY.md)
-- Check platform logs for deployment issues
+- **Deployment**: [GLITCH_DEPLOY.md](./GLITCH_DEPLOY.md) - Complete guide
+- Check platform logs for deployment issues (Glitch: "Logs" button)
 
 ## 🎯 Roadmap
 
@@ -357,4 +364,4 @@ Proprietary - All rights reserved
 
 Built with ❤️ using Flask, 11za, and AI virtual try-on
 
-**Deploy for FREE** on [Koyeb](https://www.koyeb.com/) - No credit card required! 🚀
+**Deploy for FREE** on [Glitch](https://glitch.com/) - No credit card required! 🚀

@@ -1,0 +1,30 @@
+{
+  "install": "pip install -r requirements.txt",
+  "start": "python fashioncore_11za.py",
+  "watch": {
+    "ignore": [
+      "\\.pyc$",
+      "^__pycache__/",
+      "^\\.git/",
+      "^tryon_data\\.db$",
+      "^app\\.log$"
+    ],
+    "install": {
+      "include": [
+        "^requirements\\.txt$"
+      ]
+    },
+    "restart": {
+      "exclude": [
+        "^tryon_data\\.db$",
+        "^app\\.log$"
+      ],
+      "include": [
+        "\\.py$",
+        "^templates/",
+        "^static/"
+      ]
+    },
+    "throttle": 1000
+  }
+}
