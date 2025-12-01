@@ -41,7 +41,7 @@ ELEVENZA_ORIGIN=https://rangshrii.com/
 ELEVENZA_AUTH_TOKEN=U2FsdGVkX1/e9ymvz3iAqRt4SA7LgwfStvq6pJdz4WP6yhSMsicFgT7duBMdD9V3q+Qs26KbwdBWtiNeTbqdg8sOO42m2QTejji0oVCKq0Iy81tUHFeqnLqgL285ttgrnk7qY+RRXXaM8taUwCwWVWgIuQxTaoaO4J3/JnxXLoiO8z9TZzNeCuPppwrL+v4A
 ELEVENZA_PHONE_NUMBER=919725791777
 
-# Kling AI Configuration
+# AI Service Configuration
 KLING_ACCESS_KEY=ALMrJQFypk3HCYMnkNNfa8NJCB9YPeP
 KLING_SECRET_KEY=pNYB39FT3kbGEtaCCM3Qr8PkHHBppdC
 
@@ -50,7 +50,7 @@ IMAGE_URL=https://fashioncore-ws-production.up.railway.app
 WEBSITE_URL=https://fashioncore-production.up.railway.app
 VERIFY_TOKEN=1122
 
-# Test Mode - Set to True to avoid using Kling AI credits
+# Test Mode - Set to True to avoid using AI service credits
 TEST_MODE=True"""
 
     env_path = BASE_DIR / '.env'
@@ -67,14 +67,9 @@ load_dotenv(env_path, override=True)
 
 # Verify loaded values
 print("\nLoaded environment variables:")
-for var in ['ELEVENZA_API_URL', 'ELEVENZA_ORIGIN', 'IMAGE_URL', 'WEBSITE_URL', 'KLING_ACCESS_KEY']:
+for var in ['ELEVENZA_API_URL', 'ELEVENZA_ORIGIN', 'IMAGE_URL', 'WEBSITE_URL']:
     value = os.getenv(var)
-    if var == 'ELEVENZA_AUTH_TOKEN':
-        print(f"{var}: {value[:20]}..." if value else f"{var}: None")
-    elif var in ['KLING_ACCESS_KEY', 'KLING_SECRET_KEY']:
-        print(f"{var}: {value[:10]}..." if value else f"{var}: None")
-    else:
-        print(f"{var}: {value}")
+    print(f"{var}: {value}")
 
 # Initialize logging
 logging.basicConfig(
@@ -128,12 +123,12 @@ MAX_SEED = 999999
 BRAND_NAME = "FashionCore Magic Try-on"
 BOT_NAME = "FashionCore Assistant"
 
-# Test mode flag - if True, will not call actual Kling AI API (saves credits)
+# Test mode flag - if True, will not call actual AI API (saves credits)
 TEST_MODE = os.getenv('TEST_MODE', 'True').lower() == 'true'
 
 if TEST_MODE:
     logger.warning("=" * 60)
-    logger.warning("🧪 TEST MODE ENABLED - Kling AI API calls will be mocked")
+    logger.warning("🧪 TEST MODE ENABLED - AI API calls will be mocked")
     logger.warning("=" * 60)
 
 # Add these state constants
@@ -158,7 +153,8 @@ TRIGGER_WORDS = ['start', 'hi', 'hello', 'hey', 'begin', 'tryon', 'try on', 'hel
 # Session timeout in seconds (10 minutes)
 SESSION_TIMEOUT = 600
 
-class KlingAIClient:
+class AITryOnClient:
+    """Client for AI-powered virtual try-on service"""
     def __init__(self):
         self.access_key = os.getenv('KLING_ACCESS_KEY', 'ALMrJQFypk3HCYMnkNNfa8NJCB9YPeP')
         self.secret_key = os.getenv('KLING_SECRET_KEY', 'pNYB39FT3kbGEtaCCM3Qr8PkHHBppdC')
@@ -185,7 +181,7 @@ class KlingAIClient:
 
     def try_on(self, person_img: np.ndarray, garment_img: np.ndarray, seed: int) -> Tuple[np.ndarray, str, str]:
         """
-        Use the Kling AI's Virtual Try-on API to generate a try-on image.
+        Use the AI Virtual Try-on service to generate a try-on image.
 
         Args:
             person_img: The person's image
@@ -200,8 +196,8 @@ class KlingAIClient:
 
         # TEST MODE: Return mock result without calling API
         if TEST_MODE:
-            self.logger.info("🧪 TEST MODE: Mocking Kling AI response (no API call)")
-            self.logger.info("⏱️  Simulating 3 second processing time...")
+            self.logger.info("🧪 TEST MODE: Mocking AI response (no API call)")
+            self.logger.info("⏱️  Simulating processing time...")
             time.sleep(3)  # Simulate processing time
 
             # Use a sample result image URL
@@ -231,7 +227,7 @@ class KlingAIClient:
         }
 
         try:
-            self.logger.info("Making API request to Kling AI Virtual Try-on service")
+            self.logger.info("Making API request to Virtual Try-on service")
             response = requests.post(
                 url,
                 headers=self._get_headers(),
@@ -478,23 +474,23 @@ def process_images(person_image_path: str, garment_image_path: str) -> Tuple[Opt
         logger.info(f"Garment image loaded successfully. Shape: {garment_img.shape}")
 
         # Initialize client
-        logger.info("Initializing Kling AI client")
-        client = KlingAIClient()
+        logger.info("Initializing AI processing client")
+        client = AITryOnClient()
 
         # Process images
-        logger.info("Calling Kling AI Virtual Try-on service")
+        logger.info("Calling Virtual Try-on service")
         result_img, direct_url, status_message = client.try_on(person_img, garment_img, random.randint(0, MAX_SEED))
 
         if result_img is None:
             logger.error(f"Processing failed. Status: {status_message}")
             return None, status_message
 
-        # Return the direct URL from Kling AI
+        # Return the direct URL from AI service
         if direct_url:
-            logger.info(f"Using direct URL from Kling AI: {direct_url}")
+            logger.info(f"Using direct URL from AI service: {direct_url}")
             return direct_url, "Success"
 
-        logger.error("No direct URL available from Kling AI")
+        logger.error("No direct URL available from AI service")
         return None, "Sorry, we couldn't generate a shareable image URL. Please try again."
 
     except Exception as e:
