@@ -1,0 +1,43 @@
+app:
+  name: fashioncore-11za
+  services:
+    - name: fashioncore-bot
+      type: web
+      git:
+        repository: github.com/Cardano-max/fashioncore_ws
+        branch: claude/virtual-tryon-chat-flow-01DVtLNUfjUwbaKMEDnrZrQM
+        buildCommand: ""
+        runCommand: ""
+      instance:
+        type: free
+      ports:
+        - port: 8080
+          protocol: http
+      env:
+        - name: PORT
+          value: "8080"
+        - name: ELEVENZA_API_URL
+          value: https://app.11za.in/apis/template/sendTemplate
+        - name: ELEVENZA_ORIGIN
+          value: https://rangshrii.com/
+        - name: ELEVENZA_PHONE_NUMBER
+          value: "919725791777"
+        - name: KLING_ACCESS_KEY
+          value: ALMrJQFypk3HCYMnkNNfa8NJCB9YPeP
+        - name: KLING_SECRET_KEY
+          value: pNYB39FT3kbGEtaCCM3Qr8PkHHBppdC
+        - name: VERIFY_TOKEN
+          value: "1122"
+        - name: TEST_MODE
+          value: "True"
+        - name: ELEVENZA_AUTH_TOKEN
+          secret: elevenza-auth-token
+      routes:
+        - path: /
+          port: 8080
+      health_checks:
+        - http:
+            path: /health
+            port: 8080
+      docker:
+        dockerfile: Dockerfile
