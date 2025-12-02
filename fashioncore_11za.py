@@ -251,17 +251,18 @@ class AITryOnClient:
             self.logger.info(f"Task submitted successfully. Task ID: {task_id}")
             self.logger.info("Waiting for try-on result...")
 
-            # Initial wait
-            time.sleep(9)
+            # Initial wait - give it time to start processing
+            time.sleep(10)
 
-            for attempt in range(12):
+            # Retry up to 30 times (total ~70 seconds max wait time)
+            for attempt in range(30):
                 try:
                     url = f"{self.base_url}/v1/images/kolors-virtual-try-on/{task_id}"
                     response = requests.get(url, headers=self._get_headers(), timeout=20)
 
                     if response.status_code != 200:
                         self.logger.error(f"Error checking task status: {response.text}")
-                        time.sleep(1)
+                        time.sleep(2)
                         continue
 
                     result = response.json()
@@ -283,14 +284,14 @@ class AITryOnClient:
                         self.logger.error(f"Task failed: {result['data']['task_status_msg']}")
                         return None, None, error_msg
                     else:
-                        self.logger.info(f"Task status: {status}. Waiting...")
+                        self.logger.info(f"Task status: {status}. Waiting... (attempt {attempt+1}/30)")
 
                 except requests.exceptions.ReadTimeout:
-                    self.logger.warning(f"Timeout on attempt {attempt+1}/12. Retrying...")
-                    if attempt == 11:
+                    self.logger.warning(f"Timeout on attempt {attempt+1}/30. Retrying...")
+                    if attempt == 29:
                         return None, None, "Sorry, the try-on is taking longer than expected. Please try again."
 
-                time.sleep(1)
+                time.sleep(2)
 
             return None, None, "The try-on is taking too long. Please try again later."
 
