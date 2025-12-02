@@ -23,8 +23,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
 COPY fashioncore_11za.py .
-COPY static/ static/
-COPY templates/ templates/
 
 # Create directory for database
 RUN mkdir -p /app/data
