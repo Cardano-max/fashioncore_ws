@@ -318,7 +318,7 @@ class ElevenzaWhatsAppClient:
         return {
             'Content-Type': 'application/json',
             'Origin': self.origin,
-            'Authorization': f'Bearer {self.auth_token}'
+            'authToken': self.auth_token
         }
 
     def send_text_message(self, to_number: str, message: str) -> bool:
