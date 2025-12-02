@@ -929,7 +929,22 @@ def webhook():
                 if content_type == 'text':
                     message['type'] = 'text'
                     message['text'] = content.get('text', '')
+                elif content_type == 'media':
+                    # 11za sends media with nested media object
+                    media = content.get('media', {})
+                    media_type = media.get('type', '')
+                    if media_type == 'image':
+                        message['type'] = 'image'
+                        message['image'] = {
+                            'url': media.get('url', '')
+                        }
+                    elif media_type == 'video':
+                        message['type'] = 'video'
+                        message['video'] = {
+                            'url': media.get('url', '')
+                        }
                 elif content_type == 'image':
+                    # Fallback for direct image format (if used)
                     message['type'] = 'image'
                     message['image'] = {
                         'url': content.get('url', '')
