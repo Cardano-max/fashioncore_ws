@@ -308,21 +308,56 @@ class ElevenzaWhatsAppClient:
     """Client for 11za (Elevenza) WhatsApp API"""
 
     def __init__(self):
-        self.api_url = os.getenv('ELEVENZA_API_URL')
+        # Template endpoint for starting conversations
+        self.template_url = os.getenv('ELEVENZA_API_URL', 'https://api.11za.in/apis/template/sendTemplate')
+        # Session message endpoint for free-form messages (within 24-hour window)
+        self.session_url = 'https://api.11za.in/apis/sendMessage/sendMessages'
         self.origin = os.getenv('ELEVENZA_ORIGIN')
         self.auth_token = os.getenv('ELEVENZA_AUTH_TOKEN')
         self.phone_number = os.getenv('ELEVENZA_PHONE_NUMBER')
         self.logger = logging.getLogger(__name__)
 
-    def _get_headers(self) -> Dict[str, str]:
-        return {
-            'Content-Type': 'application/json',
-            'Origin': self.origin,
-            'authToken': self.auth_token
-        }
+    def send_template_message(self, to_number: str, template_name: str = "welcome_message",
+                            language: str = "en", name: str = "Customer") -> bool:
+        """Send a template message to start the conversation"""
+        try:
+            formatted_number = to_number.replace('+', '')
+
+            payload = {
+                "sendto": formatted_number,
+                "authToken": self.auth_token,
+                "originWebsite": self.origin,
+                "templateName": template_name,
+                "language": language,
+                "name": name
+            }
+
+            self.logger.info(f"Sending template '{template_name}' to {formatted_number}")
+            self.logger.debug(f"Payload: {json.dumps(payload)}")
+
+            response = requests.post(
+                self.template_url,
+                headers={'Content-Type': 'application/json'},
+                json=payload,
+                timeout=30
+            )
+
+            self.logger.info(f"Response status: {response.status_code}")
+            self.logger.debug(f"Response: {response.text}")
+
+            if response.status_code == 200:
+                self.logger.info(f"Template sent successfully to {formatted_number}")
+                return True
+            else:
+                self.logger.error(f"Failed to send template: {response.text}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Error sending template: {str(e)}", exc_info=True)
+            return False
 
     def send_text_message(self, to_number: str, message: str) -> bool:
-        """Send a text message via 11za API"""
+        """Send a session text message via 11za API (within 24-hour window)"""
         try:
             # Format phone number if needed (remove + and country code if present)
             formatted_number = to_number.replace('+', '')
@@ -331,14 +366,15 @@ class ElevenzaWhatsAppClient:
                 "sendto": formatted_number,
                 "authToken": self.auth_token,
                 "originWebsite": self.origin,
-                "message": message
+                "contentType": "text",
+                "text": message
             }
 
-            self.logger.info(f"Sending text message to {formatted_number}")
+            self.logger.info(f"Sending session text message to {formatted_number}")
             self.logger.debug(f"Payload: {json.dumps(payload)}")
 
             response = requests.post(
-                self.api_url,
+                self.session_url,
                 headers={'Content-Type': 'application/json'},
                 json=payload,
                 timeout=30
@@ -359,7 +395,7 @@ class ElevenzaWhatsAppClient:
             return False
 
     def send_image_message(self, to_number: str, image_url: str, caption: str = "") -> bool:
-        """Send an image message via 11za API"""
+        """Send a session image message via 11za API (within 24-hour window)"""
         try:
             formatted_number = to_number.replace('+', '')
 
@@ -367,16 +403,15 @@ class ElevenzaWhatsAppClient:
                 "sendto": formatted_number,
                 "authToken": self.auth_token,
                 "originWebsite": self.origin,
-                "type": "image",
-                "myfile": image_url,  # 11za uses 'myfile' for image URL
-                "caption": caption
+                "contentType": "image",
+                "myfile": image_url  # 11za uses 'myfile' for image URL
             }
 
-            self.logger.info(f"Sending image to {formatted_number}")
+            self.logger.info(f"Sending session image to {formatted_number}")
             self.logger.debug(f"Image URL: {image_url}")
 
             response = requests.post(
-                self.api_url,
+                self.session_url,
                 headers={'Content-Type': 'application/json'},
                 json=payload,
                 timeout=30
@@ -386,6 +421,9 @@ class ElevenzaWhatsAppClient:
 
             if response.status_code == 200:
                 self.logger.info(f"Image sent successfully to {formatted_number}")
+                # If there's a caption, send it as a separate text message
+                if caption:
+                    self.send_text_message(to_number, caption)
                 return True
             else:
                 self.logger.error(f"Failed to send image: {response.text}")
@@ -567,9 +605,11 @@ def handle_message(message: dict, sender_number: str):
 
                 user_states[sender_number] = UserState.WAITING_FOR_PERSON
                 update_user_activity(sender_number)
-                elevenza_client.send_text_message(
+                # Use template message to start the conversation
+                elevenza_client.send_template_message(
                     sender_number,
-                    f"👋 Welcome to {BRAND_NAME}! Let's create a stunning virtual outfit for you.\n\nPlease send a full-body photo of yourself standing straight against a plain background."
+                    template_name="welcome_message",
+                    language="en"
                 )
                 return
 
@@ -578,9 +618,11 @@ def handle_message(message: dict, sender_number: str):
                 if is_trigger_word(text):
                     user_states[sender_number] = UserState.WAITING_FOR_PERSON
                     update_user_activity(sender_number)
-                    elevenza_client.send_text_message(
+                    # Use template message to start the conversation
+                    elevenza_client.send_template_message(
                         sender_number,
-                        f"👋 Welcome to {BRAND_NAME}! Send a full-body photo to begin."
+                        template_name="welcome_message",
+                        language="en"
                     )
                 else:
                     # Ignore non-trigger messages in IDLE state
