@@ -205,10 +205,8 @@ class AITryOnClient:
 
             self.logger.info(f"✅ Mock try-on successful! Result URL: {mock_result_url}")
 
-            # Create a simple mock result image (blend person and garment)
-            result_img = cv2.addWeighted(person_img, 0.6, garment_img, 0.4, 0)
-
-            return result_img, mock_result_url, "Success (TEST MODE)"
+            # Return the person image as-is (we're only using the URL anyway)
+            return person_img, mock_result_url, "Success (TEST MODE)"
 
         # Encode images
         encoded_person = cv2.imencode('.jpg', cv2.cvtColor(person_img, cv2.COLOR_RGB2BGR))[1]
