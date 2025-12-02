@@ -41,7 +41,7 @@ Secret Key: pNYB39FT3kbGEtaCCM3Qr8PkHHBppdC
 ```
 API URL: https://app.11za.in/apis/template/sendTemplate
 Origin: https://rangshrii.com/
-Phone: 919725791777
+Phone: 917405991551
 ```
 
 ---

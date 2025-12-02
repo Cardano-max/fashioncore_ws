@@ -11,7 +11,7 @@ Set the following environment variables in your Railway dashboard:
 ELEVENZA_API_URL=https://app.11za.in/apis/template/sendTemplate
 ELEVENZA_ORIGIN=https://rangshrii.com/
 ELEVENZA_AUTH_TOKEN=<your-11za-auth-token>
-ELEVENZA_PHONE_NUMBER=919725791777
+ELEVENZA_PHONE_NUMBER=917405991551
 
 # Kling AI Credentials
 KLING_ACCESS_KEY=ALMrJQFypk3HCYMnkNNfa8NJCB9YPeP
@@ -61,7 +61,7 @@ TEST_MODE=True
    Open: `https://your-app.up.railway.app/`
 
 6. **Test WhatsApp Flow**
-   - Send "start" to your WhatsApp number: 919725791777
+   - Send "start" to your WhatsApp number: 917405991551
    - Bot should respond with welcome message
    - Upload a person image
    - Receive mock try-on result (TEST_MODE enabled)

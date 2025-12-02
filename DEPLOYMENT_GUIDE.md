@@ -81,7 +81,7 @@ In Railway dashboard, go to **Variables** tab and add:
 ELEVENZA_API_URL=https://app.11za.in/apis/template/sendTemplate
 ELEVENZA_ORIGIN=https://rangshrii.com/
 ELEVENZA_AUTH_TOKEN=<your-11za-auth-token-here>
-ELEVENZA_PHONE_NUMBER=919725791777
+ELEVENZA_PHONE_NUMBER=917405991551
 
 # Kling AI (Already set in code, but can override)
 KLING_ACCESS_KEY=ALMrJQFypk3HCYMnkNNfa8NJCB9YPeP

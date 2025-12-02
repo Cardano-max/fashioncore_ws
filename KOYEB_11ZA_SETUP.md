@@ -33,7 +33,7 @@ Click **"Advanced"** → **"Environment Variables"** and add these:
 ELEVENZA_API_URL = https://app.11za.in/apis/template/sendTemplate
 ELEVENZA_ORIGIN = https://rangshrii.com/
 ELEVENZA_AUTH_TOKEN = U2FsdGVkX1/e9ymvz3iAqRt4SA7LgwfStvq6pJdz4WP6yhSMsicFgT7duBMdD9V3q+Qs26KbwdBWtiNeTbqdg8sOO42m2QTejji0oVCKq0Iy81tUHFeqnLqgL285ttgrnk7qY+RRXXaM8taUwCwWVWgIuQxTaoaO4J3/JnxXLoiO8z9TZzNeCuPppwrL+v4A
-ELEVENZA_PHONE_NUMBER = 919725791777
+ELEVENZA_PHONE_NUMBER = 917405991551
 KLING_ACCESS_KEY = ALMrJQFypk3HCYMnkNNfa8NJCB9YPeP
 KLING_SECRET_KEY = pNYB39FT3kbGEtaCCM3Qr8PkHHBppdC
 VERIFY_TOKEN = 1122
@@ -382,7 +382,7 @@ Your FashionCore virtual try-on bot is now:
 **Share your bot**: Send WhatsApp link to users!
 
 ```
-https://wa.me/919725791777?text=start
+https://wa.me/917405991551?text=start
 ```
 
 Or use your landing page:

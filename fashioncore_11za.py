@@ -39,7 +39,7 @@ def create_env_file():
 ELEVENZA_API_URL=https://app.11za.in/apis/template/sendTemplate
 ELEVENZA_ORIGIN=https://rangshrii.com/
 ELEVENZA_AUTH_TOKEN=U2FsdGVkX1/e9ymvz3iAqRt4SA7LgwfStvq6pJdz4WP6yhSMsicFgT7duBMdD9V3q+Qs26KbwdBWtiNeTbqdg8sOO42m2QTejji0oVCKq0Iy81tUHFeqnLqgL285ttgrnk7qY+RRXXaM8taUwCwWVWgIuQxTaoaO4J3/JnxXLoiO8z9TZzNeCuPppwrL+v4A
-ELEVENZA_PHONE_NUMBER=919725791777
+ELEVENZA_PHONE_NUMBER=917405991551
 
 # AI Service Configuration
 KLING_ACCESS_KEY=ALMrJQFypk3HCYMnkNNfa8NJCB9YPeP
@@ -765,7 +765,7 @@ def select_garment(garment_id):
         logger.info(f"Stored garment selection: {garment_id} -> {garment_url}")
 
     # Generate WhatsApp link
-    phone_number = os.getenv('ELEVENZA_PHONE_NUMBER', '919725791777')
+    phone_number = os.getenv('ELEVENZA_PHONE_NUMBER', '917405991551')
     message = f"start_{garment_id}"
     whatsapp_url = f"https://wa.me/{phone_number}?text={message}"
 

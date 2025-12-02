@@ -48,7 +48,7 @@ The application automatically creates a `.env` file with these variables:
 ELEVENZA_API_URL=https://app.11za.in/apis/template/sendTemplate
 ELEVENZA_ORIGIN=https://rangshrii.com/
 ELEVENZA_AUTH_TOKEN=<your-11za-auth-token>
-ELEVENZA_PHONE_NUMBER=919725791777
+ELEVENZA_PHONE_NUMBER=917405991551
 
 # Kling AI Configuration
 KLING_ACCESS_KEY=<your-kling-access-key>

@@ -15,7 +15,7 @@ services:
       - key: ELEVENZA_AUTH_TOKEN
         sync: false
       - key: ELEVENZA_PHONE_NUMBER
-        value: 919725791777
+        value: 917405991551
       - key: KLING_ACCESS_KEY
         value: ALMrJQFypk3HCYMnkNNfa8NJCB9YPeP
       - key: KLING_SECRET_KEY

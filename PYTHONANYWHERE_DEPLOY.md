@@ -86,7 +86,7 @@ if project_home not in sys.path:
 os.environ['ELEVENZA_API_URL'] = 'https://app.11za.in/apis/template/sendTemplate'
 os.environ['ELEVENZA_ORIGIN'] = 'https://rangshrii.com/'
 os.environ['ELEVENZA_AUTH_TOKEN'] = 'your-token-here'
-os.environ['ELEVENZA_PHONE_NUMBER'] = '919725791777'
+os.environ['ELEVENZA_PHONE_NUMBER'] = '917405991551'
 os.environ['KLING_ACCESS_KEY'] = 'ALMrJQFypk3HCYMnkNNfa8NJCB9YPeP'
 os.environ['KLING_SECRET_KEY'] = 'pNYB39FT3kbGEtaCCM3Qr8PkHHBppdC'
 os.environ['VERIFY_TOKEN'] = '1122'

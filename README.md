@@ -123,7 +123,7 @@ Set these in your deployment platform (Koyeb, Render, etc.):
 ELEVENZA_API_URL=https://app.11za.in/apis/template/sendTemplate
 ELEVENZA_ORIGIN=https://rangshrii.com/
 ELEVENZA_AUTH_TOKEN=<your-token>
-ELEVENZA_PHONE_NUMBER=919725791777
+ELEVENZA_PHONE_NUMBER=917405991551
 
 # AI Service Credentials
 KLING_ACCESS_KEY=<your-key>
