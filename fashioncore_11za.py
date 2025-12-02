@@ -328,7 +328,9 @@ class ElevenzaWhatsAppClient:
             formatted_number = to_number.replace('+', '')
 
             payload = {
-                "to": formatted_number,
+                "sendto": formatted_number,
+                "authToken": self.auth_token,
+                "originWebsite": self.origin,
                 "message": message
             }
 
@@ -337,7 +339,7 @@ class ElevenzaWhatsAppClient:
 
             response = requests.post(
                 self.api_url,
-                headers=self._get_headers(),
+                headers={'Content-Type': 'application/json'},
                 json=payload,
                 timeout=30
             )
@@ -362,12 +364,12 @@ class ElevenzaWhatsAppClient:
             formatted_number = to_number.replace('+', '')
 
             payload = {
-                "to": formatted_number,
+                "sendto": formatted_number,
+                "authToken": self.auth_token,
+                "originWebsite": self.origin,
                 "type": "image",
-                "image": {
-                    "url": image_url,
-                    "caption": caption
-                }
+                "myfile": image_url,  # 11za uses 'myfile' for image URL
+                "caption": caption
             }
 
             self.logger.info(f"Sending image to {formatted_number}")
@@ -375,7 +377,7 @@ class ElevenzaWhatsAppClient:
 
             response = requests.post(
                 self.api_url,
-                headers=self._get_headers(),
+                headers={'Content-Type': 'application/json'},
                 json=payload,
                 timeout=30
             )
