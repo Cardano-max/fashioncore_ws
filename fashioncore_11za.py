@@ -589,10 +589,56 @@ def process_images(person_image_path: str, garment_image_path: str) -> Tuple[Opt
             logger.error(f"Processing failed. Status: {status_message}")
             return None, status_message
 
-        # Return the direct URL from AI service
+        # Download the result image from Kling AI and save it locally
         if direct_url:
-            logger.info(f"Using direct URL from AI service: {direct_url}")
-            return direct_url, "Success"
+            logger.info(f"Downloading result image from: {direct_url}")
+            try:
+                # Create results directory if it doesn't exist
+                results_dir = BASE_DIR / 'static' / 'results'
+                results_dir.mkdir(parents=True, exist_ok=True)
+
+                # Download the image from Kling AI
+                img_response = requests.get(direct_url, timeout=30)
+                img_response.raise_for_status()
+
+                # Generate unique filename
+                result_filename = f"result_{uuid.uuid4().hex[:12]}.png"
+                result_path = results_dir / result_filename
+
+                # Save the image
+                with open(result_path, 'wb') as f:
+                    f.write(img_response.content)
+
+                logger.info(f"✅ Result image saved locally: {result_filename}")
+
+                # Return our own URL instead of Kling AI URL
+                # Use the Koyeb public URL
+                our_url = f"https://like-lydia-1ateeb1-3772b8c7.koyeb.app/results/{result_filename}"
+                logger.info(f"📍 Our URL: {our_url}")
+                return our_url, "Success"
+
+            except Exception as e:
+                logger.error(f"Failed to download/save result image: {str(e)}")
+                # Fallback - still try to use the image if we have it in memory
+                if result_img is not None:
+                    logger.warning("Using fallback: trying to save from memory")
+                    try:
+                        results_dir = BASE_DIR / 'static' / 'results'
+                        results_dir.mkdir(parents=True, exist_ok=True)
+                        result_filename = f"result_{uuid.uuid4().hex[:12]}.png"
+                        result_path = results_dir / result_filename
+
+                        # Convert RGB to BGR for cv2
+                        result_bgr = cv2.cvtColor(result_img, cv2.COLOR_RGB2BGR)
+                        cv2.imwrite(str(result_path), result_bgr)
+
+                        our_url = f"https://like-lydia-1ateeb1-3772b8c7.koyeb.app/results/{result_filename}"
+                        logger.info(f"✅ Saved from memory: {result_filename}")
+                        return our_url, "Success"
+                    except Exception as e2:
+                        logger.error(f"Fallback also failed: {str(e2)}")
+                        return None, "Sorry, we couldn't save the result image. Please try again."
+                return None, "Sorry, we couldn't save the result image. Please try again."
 
         logger.error("No direct URL available from AI service")
         return None, "Sorry, we couldn't generate a shareable image URL. Please try again."
@@ -899,6 +945,17 @@ def select_garment(garment_id):
 @app.route('/health')
 def health():
     return jsonify({"status": "ok", "time": time.time()}), 200
+
+# Route to serve result images
+@app.route('/results/<filename>')
+def serve_result_image(filename):
+    """Serve result images from static/results directory"""
+    try:
+        results_dir = BASE_DIR / 'static' / 'results'
+        return send_from_directory(results_dir, filename)
+    except Exception as e:
+        logger.error(f"Error serving result image {filename}: {str(e)}")
+        return jsonify({"error": "Image not found"}), 404
 
 @app.route('/admin')
 def admin_panel():
