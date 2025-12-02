@@ -226,7 +226,16 @@ class AITryOnClient:
         }
 
         try:
-            self.logger.info("Making API request to Virtual Try-on service")
+            self.logger.info("=" * 80)
+            self.logger.info("🚀 KLING AI API - SUBMITTING VIRTUAL TRY-ON TASK")
+            self.logger.info("=" * 80)
+            self.logger.info(f"📍 Endpoint: {url}")
+            self.logger.info(f"🤖 Model: {data['model_name']}")
+            self.logger.info(f"🎲 Seed: {data['seed']}")
+            self.logger.info(f"📸 Person Image: Base64 encoded ({len(encoded_person)} chars)")
+            self.logger.info(f"👕 Garment Image: Base64 encoded ({len(encoded_garment)} chars)")
+            self.logger.info("⏳ Sending request to Kling AI API...")
+
             response = requests.post(
                 url,
                 headers=self._get_headers(),
@@ -234,65 +243,101 @@ class AITryOnClient:
                 timeout=50
             )
 
+            self.logger.info(f"📡 Response Status Code: {response.status_code}")
+
             if response.status_code == 429:
                 error_msg = "Sorry, our service is currently at capacity. Please try again in a few minutes."
-                self.logger.error(f"API rate limit exceeded: {response.text}")
+                self.logger.error(f"❌ API rate limit exceeded")
+                self.logger.error(f"Response: {response.text}")
                 return None, None, error_msg
 
             if response.status_code != 200:
                 error_msg = f"Error: API returned status code {response.status_code}"
-                self.logger.error(f"API error: {response.text}")
+                self.logger.error(f"❌ API error - Status {response.status_code}")
+                self.logger.error(f"Response: {response.text}")
                 return None, None, error_msg
 
             result = response.json()
+            self.logger.info(f"📦 Full API Response: {json.dumps(result, indent=2)}")
+
             task_id = result['data']['task_id']
 
             # Wait for result
-            self.logger.info(f"Task submitted successfully. Task ID: {task_id}")
-            self.logger.info("Waiting for try-on result...")
+            self.logger.info(f"✅ Task submitted successfully. Task ID: {task_id}")
+            self.logger.info("=" * 80)
+            self.logger.info("⏳ WAITING FOR KLING AI TO PROCESS VIRTUAL TRY-ON")
+            self.logger.info("=" * 80)
 
             # Initial wait - give it time to start processing
+            self.logger.info("⏱️  Initial wait: 10 seconds...")
             time.sleep(10)
 
-            # Retry up to 30 times (total ~70 seconds max wait time)
-            for attempt in range(30):
+            # Retry up to 50 times (total ~110 seconds max wait time)
+            self.logger.info("🔄 Starting status polling (50 attempts, 2 seconds between checks)")
+            for attempt in range(50):
                 try:
                     url = f"{self.base_url}/v1/images/kolors-virtual-try-on/{task_id}"
+                    self.logger.info(f"\n🔍 Attempt {attempt+1}/50 - Checking task status...")
+                    self.logger.debug(f"   GET {url}")
+
                     response = requests.get(url, headers=self._get_headers(), timeout=20)
 
+                    self.logger.info(f"   📡 Response Status: {response.status_code}")
+
                     if response.status_code != 200:
-                        self.logger.error(f"Error checking task status: {response.text}")
+                        self.logger.error(f"   ❌ Error checking task status")
+                        self.logger.error(f"   Response: {response.text}")
                         time.sleep(2)
                         continue
 
                     result = response.json()
+                    self.logger.debug(f"   📦 Full Response: {json.dumps(result, indent=2)}")
+
                     status = result['data']['task_status']
+                    self.logger.info(f"   📊 Task Status: {status}")
 
                     if status == "succeed":
+                        self.logger.info("   🎉 Task succeeded!")
                         output_url = result['data']['task_result']['images'][0]['url']
-                        self.logger.info(f"Try-on successful! Result URL: {output_url}")
+                        self.logger.info(f"   🖼️  Result URL: {output_url}")
+                        self.logger.info("=" * 80)
+                        self.logger.info("✅ KLING AI VIRTUAL TRY-ON COMPLETED SUCCESSFULLY")
+                        self.logger.info("=" * 80)
 
+                        # Download the result image
+                        self.logger.info("📥 Downloading result image...")
                         img_response = requests.get(output_url)
                         img_response.raise_for_status()
 
                         nparr = np.frombuffer(img_response.content, np.uint8)
                         result_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                         result_img = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
+                        self.logger.info("✅ Image downloaded and decoded successfully")
                         return result_img, output_url, "Success"
+
                     elif status == "failed":
-                        error_msg = f"Sorry, we couldn't create the try-on image. {result['data']['task_status_msg']}"
-                        self.logger.error(f"Task failed: {result['data']['task_status_msg']}")
-                        return None, None, error_msg
+                        self.logger.error("   ❌ Task failed!")
+                        error_msg = result['data'].get('task_status_msg', 'Unknown error')
+                        self.logger.error(f"   Error message: {error_msg}")
+                        self.logger.error("=" * 80)
+                        return None, None, f"Sorry, we couldn't create the try-on image. {error_msg}"
+
                     else:
-                        self.logger.info(f"Task status: {status}. Waiting... (attempt {attempt+1}/30)")
+                        self.logger.info(f"   ⏳ Still {status}... waiting 2 seconds before next check")
 
                 except requests.exceptions.ReadTimeout:
-                    self.logger.warning(f"Timeout on attempt {attempt+1}/30. Retrying...")
-                    if attempt == 29:
+                    self.logger.warning(f"   ⚠️  Timeout on attempt {attempt+1}/50. Retrying...")
+                    if attempt == 49:
+                        self.logger.error("=" * 80)
+                        self.logger.error("❌ TIMEOUT: Kling AI processing took too long")
+                        self.logger.error("=" * 80)
                         return None, None, "Sorry, the try-on is taking longer than expected. Please try again."
 
                 time.sleep(2)
 
+            self.logger.error("=" * 80)
+            self.logger.error("❌ MAX ATTEMPTS REACHED: Task still processing after 50 attempts")
+            self.logger.error("=" * 80)
             return None, None, "The try-on is taking too long. Please try again later."
 
         except requests.exceptions.RequestException as e:
@@ -407,8 +452,15 @@ class ElevenzaWhatsAppClient:
                 "myfile": image_url  # 11za uses 'myfile' for image URL
             }
 
-            self.logger.info(f"Sending session image to {formatted_number}")
-            self.logger.debug(f"Image URL: {image_url}")
+            self.logger.info("=" * 80)
+            self.logger.info("📸 11ZA API - SENDING IMAGE MESSAGE")
+            self.logger.info("=" * 80)
+            self.logger.info(f"📍 Endpoint: {self.session_url}")
+            self.logger.info(f"📱 To Number: {formatted_number}")
+            self.logger.info(f"🖼️  Image URL: {image_url}")
+            self.logger.info(f"💬 Caption: {caption if caption else 'None'}")
+            self.logger.info(f"📦 Payload: {json.dumps({**payload, 'authToken': '***HIDDEN***'}, indent=2)}")
+            self.logger.info("⏳ Sending image to WhatsApp...")
 
             response = requests.post(
                 self.session_url,
@@ -417,24 +469,36 @@ class ElevenzaWhatsAppClient:
                 timeout=30
             )
 
-            self.logger.info(f"Response status: {response.status_code}")
+            self.logger.info(f"📡 Response Status Code: {response.status_code}")
+            self.logger.info(f"📦 Response Body: {response.text}")
 
             if response.status_code == 200:
-                self.logger.info(f"Image sent successfully to {formatted_number}")
+                self.logger.info("=" * 80)
+                self.logger.info("✅ IMAGE SENT SUCCESSFULLY TO WHATSAPP")
+                self.logger.info("=" * 80)
                 # If there's a caption, send it as a separate text message
                 if caption:
+                    self.logger.info("📝 Sending caption as separate text message...")
                     self.send_text_message(to_number, caption)
                 return True
             else:
-                self.logger.error(f"Failed to send image: {response.text}")
+                self.logger.error("=" * 80)
+                self.logger.error("❌ FAILED TO SEND IMAGE")
+                self.logger.error("=" * 80)
+                self.logger.error(f"Error response: {response.text}")
                 # Fallback to text message with link
+                self.logger.info("🔄 Attempting fallback: sending image URL as text message...")
                 fallback_msg = f"{caption}\n\nView your image: {image_url}"
                 return self.send_text_message(to_number, fallback_msg)
 
         except Exception as e:
-            self.logger.error(f"Error sending image: {str(e)}", exc_info=True)
+            self.logger.error("=" * 80)
+            self.logger.error("❌ EXCEPTION WHILE SENDING IMAGE")
+            self.logger.error("=" * 80)
+            self.logger.error(f"Exception: {str(e)}", exc_info=True)
             # Fallback to text message
             try:
+                self.logger.info("🔄 Attempting fallback: sending image URL as text message...")
                 fallback_msg = f"{caption}\n\nView your image: {image_url}"
                 return self.send_text_message(to_number, fallback_msg)
             except:
