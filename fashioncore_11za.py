@@ -41,17 +41,17 @@ ELEVENZA_ORIGIN=https://rangshrii.com/
 ELEVENZA_AUTH_TOKEN=U2FsdGVkX1/e9ymvz3iAqRt4SA7LgwfStvq6pJdz4WP6yhSMsicFgT7duBMdD9V3q+Qs26KbwdBWtiNeTbqdg8sOO42m2QTejji0oVCKq0Iy81tUHFeqnLqgL285ttgrnk7qY+RRXXaM8taUwCwWVWgIuQxTaoaO4J3/JnxXLoiO8z9TZzNeCuPppwrL+v4A
 ELEVENZA_PHONE_NUMBER=917405991551
 
-# AI Service Configuration
-KLING_ACCESS_KEY=ALMrJQFypk3HCYMnkNNfa8NJCB9YPeP
-KLING_SECRET_KEY=pNYB39FT3kbGEtaCCM3Qr8PkHHBppdC
+# Kling AI Virtual Try-On Configuration
+KLING_ACCESS_KEY=Ah3KfartkY4HnTJygEDknr9N433PDKGf
+KLING_SECRET_KEY=tLFYhtTg3KHaD9G8DQEDDhAnrn8BrdyD
 
 # App Configuration
 IMAGE_URL=https://fashioncore-ws-production.up.railway.app
 WEBSITE_URL=https://fashioncore-production.up.railway.app
 VERIFY_TOKEN=1122
 
-# Test Mode - Set to True to avoid using AI service credits
-TEST_MODE=True"""
+# Test Mode - Set to False for production (uses real AI)
+TEST_MODE=False"""
 
     env_path = BASE_DIR / '.env'
     env_path.write_text(env_content)
@@ -120,11 +120,11 @@ init_db()
 MAX_SEED = 999999
 
 # Brand name constants
-BRAND_NAME = "FashionCore Magic Try-on"
-BOT_NAME = "FashionCore Assistant"
+BRAND_NAME = "Rangshrii"
+BOT_NAME = "Rangshrii Virtual Try-On"
 
 # Test mode flag - if True, will not call actual AI API (saves credits)
-TEST_MODE = os.getenv('TEST_MODE', 'True').lower() == 'true'
+TEST_MODE = os.getenv('TEST_MODE', 'False').lower() == 'true'
 
 if TEST_MODE:
     logger.warning("=" * 60)
@@ -134,6 +134,7 @@ if TEST_MODE:
 # Add these state constants
 class UserState:
     IDLE = "idle"
+    WAITING_FOR_GARMENT = "waiting_for_garment"
     WAITING_FOR_PERSON = "waiting_for_person"
     PROCESSING = "processing"
     SHOWING_RESULT = "showing_result"
@@ -147,8 +148,8 @@ user_last_activity = {}  # Format: {phone_number: timestamp}
 # Store garment selections from landing page
 garment_selections = {}  # Format: {session_id: garment_image_url}
 
-# Trigger words that bot responds to
-TRIGGER_WORDS = ['start', 'hi', 'hello', 'hey', 'begin', 'tryon', 'try on', 'help']
+# Trigger words that bot responds to (exact matches only)
+TRIGGER_WORDS = ['start', 'tryon', 'rangshrii']
 
 # Session timeout in seconds (10 minutes)
 SESSION_TIMEOUT = 600
@@ -156,8 +157,8 @@ SESSION_TIMEOUT = 600
 class AITryOnClient:
     """Client for AI-powered virtual try-on service"""
     def __init__(self):
-        self.access_key = os.getenv('KLING_ACCESS_KEY', 'ALMrJQFypk3HCYMnkNNfa8NJCB9YPeP')
-        self.secret_key = os.getenv('KLING_SECRET_KEY', 'pNYB39FT3kbGEtaCCM3Qr8PkHHBppdC')
+        self.access_key = os.getenv('KLING_ACCESS_KEY', 'Ah3KfartkY4HnTJygEDknr9N433PDKGf')
+        self.secret_key = os.getenv('KLING_SECRET_KEY', 'tLFYhtTg3KHaD9G8DQEDDhAnrn8BrdyD')
         self.base_url = "https://api.klingai.com"
         self.logger = logging.getLogger(__name__)
 
@@ -558,16 +559,10 @@ def update_user_activity(sender_number: str):
     user_last_activity[sender_number] = time.time()
 
 def is_trigger_word(text: str) -> bool:
-    """Check if text contains any trigger word"""
+    """Check if text is an exact match with trigger words"""
     text_lower = text.lower().strip()
-    # Check for exact match or if trigger word is in the text
-    for trigger in TRIGGER_WORDS:
-        if trigger in text_lower:
-            return True
-    # Also check for start_ pattern
-    if text_lower.startswith('start_'):
-        return True
-    return False
+    # Check for exact match only
+    return text_lower in TRIGGER_WORDS
 
 def handle_message(message: dict, sender_number: str):
     """Handle incoming messages from 11za webhook"""
@@ -590,46 +585,34 @@ def handle_message(message: dict, sender_number: str):
                 logger.info(f"Ignoring empty message from {sender_number}")
                 return
 
-            # Check if this is a start command with garment ID
-            if text.startswith('start_'):
-                garment_id = text.replace('start_', '')
-                logger.info(f"User starting with garment ID: {garment_id}")
-
-                # Look up garment URL from selection
-                garment_url = garment_selections.get(garment_id)
-                if garment_url:
-                    user_images[sender_number] = {'garment_url': garment_url}
-                    logger.info(f"Found garment URL: {garment_url}")
-
-                user_states[sender_number] = UserState.WAITING_FOR_PERSON
-                update_user_activity(sender_number)
-                # Customer initiated conversation, so 24hr window is active - use free text
-                elevenza_client.send_text_message(
-                    sender_number,
-                    f"👋 Welcome to {BRAND_NAME}! Let's create a stunning virtual outfit for you.\n\nPlease send a full-body photo of yourself standing straight against a plain background."
-                )
-                return
-
             # In IDLE state, only respond to trigger words
             if current_state == UserState.IDLE:
                 if is_trigger_word(text):
-                    user_states[sender_number] = UserState.WAITING_FOR_PERSON
+                    user_states[sender_number] = UserState.WAITING_FOR_GARMENT
                     update_user_activity(sender_number)
                     # Customer initiated conversation, so 24hr window is active - use free text
                     elevenza_client.send_text_message(
                         sender_number,
-                        f"👋 Welcome to {BRAND_NAME}! Send a full-body photo to begin."
+                        f"👋 Welcome to {BRAND_NAME} Virtual Try-On!\n\nPlease send an image of the clothing/garment you want to try on. 👕👗"
                     )
                 else:
                     # Ignore non-trigger messages in IDLE state
                     logger.info(f"Ignoring non-trigger message in IDLE state from {sender_number}: {text}")
                 return
 
-            # In WAITING_FOR_PERSON state, remind to send image
+            # In WAITING_FOR_GARMENT state, remind to send garment image
+            elif current_state == UserState.WAITING_FOR_GARMENT:
+                elevenza_client.send_text_message(
+                    sender_number,
+                    "Please send an image of the clothing/garment you want to try on. 👕👗"
+                )
+                return
+
+            # In WAITING_FOR_PERSON state, remind to send person image
             elif current_state == UserState.WAITING_FOR_PERSON:
                 elevenza_client.send_text_message(
                     sender_number,
-                    "Please send a full-body photo of yourself to continue. 📸"
+                    "Please send a full-body photo of yourself to continue. 📸\n\nMake sure:\n• Full body is visible\n• Good lighting\n• Standing straight\n• Plain background"
                 )
                 return
 
@@ -646,11 +629,11 @@ def handle_message(message: dict, sender_number: str):
                 if is_trigger_word(text):
                     # Reset and start new session
                     reset_user_session(sender_number)
-                    user_states[sender_number] = UserState.WAITING_FOR_PERSON
+                    user_states[sender_number] = UserState.WAITING_FOR_GARMENT
                     update_user_activity(sender_number)
                     elevenza_client.send_text_message(
                         sender_number,
-                        f"👋 Great! Send a full-body photo to try another outfit."
+                        f"👋 Great! Send an image of the clothing/garment you want to try on. 👕👗"
                     )
                 else:
                     # After showing result, auto-reset and go to IDLE
@@ -659,197 +642,146 @@ def handle_message(message: dict, sender_number: str):
                 return
 
         elif message_type == 'image':
-            if current_state == UserState.WAITING_FOR_PERSON:
-                # Handle person image
-                image_url = message.get('image', {}).get('url')
-                if not image_url:
+            # Handle garment image first
+            if current_state == UserState.WAITING_FOR_GARMENT:
+                # Save garment image URL
+                garment_url = message.get('image', {}).get('url')
+                if not garment_url:
                     elevenza_client.send_text_message(
                         sender_number,
-                        "I couldn't process that image. Please try sending it again."
+                        "I couldn't process that image. Please try sending the garment image again."
                     )
                     return
 
-                image_path = download_image_from_url(image_url)
-                if image_path:
-                    # Check if we have a pre-selected garment
-                    if sender_number in user_images and 'garment_url' in user_images[sender_number]:
-                        garment_url = user_images[sender_number]['garment_url']
-                        logger.info(f"Using pre-selected garment: {garment_url}")
+                # Save garment URL for this user
+                user_images[sender_number] = {'garment_url': garment_url}
+                logger.info(f"Saved garment image for {sender_number}: {garment_url}")
 
-                        # Download garment image
-                        garment_path = download_image_from_url(garment_url)
-                        if not garment_path:
-                            elevenza_client.send_text_message(
-                                sender_number,
-                                "Sorry, there was an issue with the garment image. Please try again."
-                            )
-                            return
+                # Move to waiting for person image
+                user_states[sender_number] = UserState.WAITING_FOR_PERSON
+                update_user_activity(sender_number)
 
-                        # Let the user know we're processing
-                        elevenza_client.send_text_message(
-                            sender_number,
-                            f"✨ Creating your outfit with {BRAND_NAME} magic! This should take about 15-20 seconds..."
-                        )
+                elevenza_client.send_text_message(
+                    sender_number,
+                    "Great! Now please send a full-body photo of yourself. 📸\n\nMake sure:\n• Full body is visible\n• Good lighting\n• Standing straight\n• Plain background"
+                )
+                return
 
-                        user_states[sender_number] = UserState.PROCESSING
-
-                        try:
-                            # Process the images
-                            direct_url, status_message = process_images(image_path, garment_path)
-
-                            if direct_url:
-                                # Save the result URL
-                                user_results[sender_number] = {'result_url': direct_url}
-
-                                # Log this try-on attempt
-                                log_tryon_attempt(
-                                    sender_number,
-                                    image_url,
-                                    garment_url,
-                                    direct_url
-                                )
-
-                                # Send the result image
-                                success = elevenza_client.send_image_message(
-                                    sender_number,
-                                    direct_url,
-                                    f"✨ Here's your {BRAND_NAME} result! What do you think?"
-                                )
-
-                                if success:
-                                    user_states[sender_number] = UserState.SHOWING_RESULT
-                                    time.sleep(2)
-                                    elevenza_client.send_text_message(
-                                        sender_number,
-                                        "Love it? Want to try another outfit? Send 'start' to try again! 😊"
-                                    )
-                                    # Auto-reset session after 5 seconds
-                                    time.sleep(5)
-                                    logger.info(f"Auto-resetting session for {sender_number} after result")
-                                    reset_user_session(sender_number)
-                                else:
-                                    elevenza_client.send_text_message(
-                                        sender_number,
-                                        f"I created your try-on image! View it at: {direct_url}\n\nWant to try more? Send 'start'!"
-                                    )
-                                    # Auto-reset session
-                                    reset_user_session(sender_number)
-                            else:
-                                elevenza_client.send_text_message(
-                                    sender_number,
-                                    f"Sorry, {status_message} Please try again by sending 'start'."
-                                )
-                                reset_user_session(sender_number)
-                        except Exception as e:
-                            logger.error(f"Error in processing: {str(e)}", exc_info=True)
-                            elevenza_client.send_text_message(
-                                sender_number,
-                                "Sorry, something went wrong while creating your try-on. Please try again by sending 'start'."
-                            )
-                            reset_user_session(sender_number)
-                        finally:
-                            # Clean up temporary files
-                            try:
-                                os.remove(image_path)
-                                os.remove(garment_path)
-                            except Exception as e:
-                                logger.error(f"Error removing temporary files: {str(e)}")
-                    else:
-                        # No garment selected
-                        # In TEST_MODE, automatically use a mock garment
-                        if TEST_MODE:
-                            logger.info("TEST_MODE: Using mock garment URL")
-                            mock_garment_url = "https://example.com/mock-garment.jpg"
-
-                            # Let the user know we're processing
-                            elevenza_client.send_text_message(
-                                sender_number,
-                                f"⏳ Processing your image... This will take about 30-60 seconds. Please wait!"
-                            )
-
-                            user_states[sender_number] = UserState.PROCESSING
-
-                            try:
-                                # In TEST_MODE, create a dummy garment image (won't be used, just needs to exist)
-                                # Create a simple 512x512 colored image as dummy garment
-                                import numpy as np
-                                dummy_garment = np.ones((512, 512, 3), dtype=np.uint8) * 128  # Gray image
-                                dummy_garment_path = f"dummy_garment_{uuid.uuid4().hex[:8]}.jpg"
-                                cv2.imwrite(dummy_garment_path, dummy_garment)
-
-                                # Process images - TEST_MODE will return mock result
-                                direct_url, status_message = process_images(image_path, dummy_garment_path)
-
-                                if direct_url:
-                                    # Save the result URL
-                                    user_results[sender_number] = {'result_url': direct_url}
-
-                                    # Log this try-on attempt
-                                    log_tryon_attempt(
-                                        sender_number,
-                                        image_url,
-                                        mock_garment_url,
-                                        direct_url
-                                    )
-
-                                    # Send the result image
-                                    success = elevenza_client.send_image_message(
-                                        sender_number,
-                                        direct_url,
-                                        f"✨ Your virtual try-on is ready! What do you think?"
-                                    )
-
-                                    if success:
-                                        user_states[sender_number] = UserState.SHOWING_RESULT
-                                        time.sleep(2)
-                                        elevenza_client.send_text_message(
-                                            sender_number,
-                                            "Send another photo to try again, or send 'start' to begin a new session! 😊"
-                                        )
-                                        # Auto-reset session after 5 seconds
-                                        time.sleep(5)
-                                        logger.info(f"Auto-resetting session for {sender_number} after result")
-                                        reset_user_session(sender_number)
-                                    else:
-                                        elevenza_client.send_text_message(
-                                            sender_number,
-                                            f"I created your try-on image! View it at: {direct_url}\n\nWant to try more? Send 'start'!"
-                                        )
-                                        # Auto-reset session
-                                        reset_user_session(sender_number)
-                                else:
-                                    elevenza_client.send_text_message(
-                                        sender_number,
-                                        f"Sorry, {status_message} Please try again by sending 'start'."
-                                    )
-                                    reset_user_session(sender_number)
-                            except Exception as e:
-                                logger.error(f"Error in processing: {str(e)}", exc_info=True)
-                                elevenza_client.send_text_message(
-                                    sender_number,
-                                    "Sorry, something went wrong while creating your try-on. Please try again by sending 'start'."
-                                )
-                                reset_user_session(sender_number)
-                            finally:
-                                # Clean up temporary files
-                                try:
-                                    os.remove(image_path)
-                                    if 'dummy_garment_path' in locals():
-                                        os.remove(dummy_garment_path)
-                                except Exception as e:
-                                    logger.error(f"Error removing temporary files: {str(e)}")
-                        else:
-                            # Production mode: ask for garment image
-                            user_images[sender_number] = {'person': image_path, 'person_url': image_url}
-                            elevenza_client.send_text_message(
-                                sender_number,
-                                "Great! Now please send an image of the clothing item you want to try on."
-                            )
-                else:
+            # Handle person image
+            elif current_state == UserState.WAITING_FOR_PERSON:
+                # Get person image
+                person_image_url = message.get('image', {}).get('url')
+                if not person_image_url:
                     elevenza_client.send_text_message(
                         sender_number,
-                        "I'm having trouble downloading your image. Please try sending a different photo."
+                        "I couldn't process that image. Please try sending your photo again."
                     )
+                    return
+
+                # Get the saved garment URL
+                if sender_number not in user_images or 'garment_url' not in user_images[sender_number]:
+                    elevenza_client.send_text_message(
+                        sender_number,
+                        "Something went wrong. Please start again by sending 'start'."
+                    )
+                    reset_user_session(sender_number)
+                    return
+
+                garment_url = user_images[sender_number]['garment_url']
+                logger.info(f"Processing try-on for {sender_number}: garment={garment_url}, person={person_image_url}")
+
+                # Download both images
+                person_path = download_image_from_url(person_image_url)
+                if not person_path:
+                    elevenza_client.send_text_message(
+                        sender_number,
+                        "I'm having trouble downloading your photo. Please try sending a different image."
+                    )
+                    return
+
+                garment_path = download_image_from_url(garment_url)
+                if not garment_path:
+                    elevenza_client.send_text_message(
+                        sender_number,
+                        "Sorry, there was an issue with the garment image. Please start again by sending 'start'."
+                    )
+                    try:
+                        os.remove(person_path)
+                    except:
+                        pass
+                    reset_user_session(sender_number)
+                    return
+
+                # Let the user know we're processing
+                elevenza_client.send_text_message(
+                    sender_number,
+                    f"⏳ Processing your virtual try-on... This takes about 15-20 seconds. Please wait!"
+                )
+
+                user_states[sender_number] = UserState.PROCESSING
+                update_user_activity(sender_number)
+
+                try:
+                    # Process the images with AI
+                    result_url, status_message = process_images(person_path, garment_path)
+
+                    if result_url:
+                        # Save the result URL
+                        user_results[sender_number] = {'result_url': result_url}
+
+                        # Log this try-on attempt
+                        log_tryon_attempt(
+                            sender_number,
+                            person_image_url,
+                            garment_url,
+                            result_url
+                        )
+
+                        # Send the result image
+                        success = elevenza_client.send_image_message(
+                            sender_number,
+                            result_url,
+                            f"✨ Your virtual try-on is ready!"
+                        )
+
+                        if success:
+                            user_states[sender_number] = UserState.SHOWING_RESULT
+                            time.sleep(2)
+                            elevenza_client.send_text_message(
+                                sender_number,
+                                "Love the look? Want to try more? Just send 'start'! 😊"
+                            )
+                            # Auto-reset session after 5 seconds
+                            time.sleep(5)
+                            logger.info(f"Auto-resetting session for {sender_number} after result")
+                            reset_user_session(sender_number)
+                        else:
+                            # If image sending failed, send as text with link
+                            elevenza_client.send_text_message(
+                                sender_number,
+                                f"Your try-on is ready! View it here: {result_url}\n\nWant to try more? Send 'start'!"
+                            )
+                            reset_user_session(sender_number)
+                    else:
+                        elevenza_client.send_text_message(
+                            sender_number,
+                            f"Sorry, {status_message} Please try again by sending 'start'."
+                        )
+                        reset_user_session(sender_number)
+                except Exception as e:
+                    logger.error(f"Error in processing: {str(e)}", exc_info=True)
+                    elevenza_client.send_text_message(
+                        sender_number,
+                        "Sorry, something went wrong while creating your try-on. Please try again by sending 'start'."
+                    )
+                    reset_user_session(sender_number)
+                finally:
+                    # Clean up temporary files
+                    try:
+                        os.remove(person_path)
+                        os.remove(garment_path)
+                    except Exception as e:
+                        logger.error(f"Error removing temporary files: {str(e)}")
             else:
                 # Image sent in wrong state, ignore
                 logger.info(f"Ignoring image in state {current_state} from {sender_number}")
