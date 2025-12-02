@@ -605,11 +605,10 @@ def handle_message(message: dict, sender_number: str):
 
                 user_states[sender_number] = UserState.WAITING_FOR_PERSON
                 update_user_activity(sender_number)
-                # Use template message to start the conversation
-                elevenza_client.send_template_message(
+                # Customer initiated conversation, so 24hr window is active - use free text
+                elevenza_client.send_text_message(
                     sender_number,
-                    template_name="welcome_message",
-                    language="en"
+                    f"👋 Welcome to {BRAND_NAME}! Let's create a stunning virtual outfit for you.\n\nPlease send a full-body photo of yourself standing straight against a plain background."
                 )
                 return
 
@@ -618,11 +617,10 @@ def handle_message(message: dict, sender_number: str):
                 if is_trigger_word(text):
                     user_states[sender_number] = UserState.WAITING_FOR_PERSON
                     update_user_activity(sender_number)
-                    # Use template message to start the conversation
-                    elevenza_client.send_template_message(
+                    # Customer initiated conversation, so 24hr window is active - use free text
+                    elevenza_client.send_text_message(
                         sender_number,
-                        template_name="welcome_message",
-                        language="en"
+                        f"👋 Welcome to {BRAND_NAME}! Send a full-body photo to begin."
                     )
                 else:
                     # Ignore non-trigger messages in IDLE state
