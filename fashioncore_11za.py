@@ -876,16 +876,37 @@ def webhook():
             data = request.get_json()
             logger.info(f"Received webhook data: {json.dumps(data, indent=2)}")
 
-            # Handle 11za webhook format
-            # The exact format may vary - adjust based on 11za documentation
-            if 'messages' in data:
+            # Handle 11za direct webhook format
+            if 'from' in data and 'content' in data:
+                sender_number = data.get('from')
+                content = data.get('content', {})
+                content_type = content.get('contentType', 'text')
+
+                # Transform 11za format to internal format
+                message = {}
+                if content_type == 'text':
+                    message['type'] = 'text'
+                    message['text'] = content.get('text', '')
+                elif content_type == 'image':
+                    message['type'] = 'image'
+                    message['image'] = {
+                        'url': content.get('url', '')
+                    }
+
+                if sender_number and message:
+                    logger.info(f"Processing 11za message from {sender_number}: {message}")
+                    handle_message(message, sender_number)
+
+            # Handle Meta-style message array format (if 11za uses it)
+            elif 'messages' in data:
                 messages = data['messages']
                 for message in messages:
                     sender_number = message.get('from')
                     if sender_number:
                         handle_message(message, sender_number)
+
+            # Handle Meta-style entry format (if 11za uses it)
             elif 'entry' in data:
-                # Meta-style webhook format (if 11za uses similar structure)
                 for entry in data['entry']:
                     if 'changes' in entry:
                         for change in entry['changes']:
