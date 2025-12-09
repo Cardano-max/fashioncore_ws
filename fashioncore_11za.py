@@ -486,23 +486,16 @@ class ElevenzaWhatsAppClient:
                 self.logger.error("❌ FAILED TO SEND IMAGE")
                 self.logger.error("=" * 80)
                 self.logger.error(f"Error response: {response.text}")
-                # Fallback to text message with link
-                self.logger.info("🔄 Attempting fallback: sending image URL as text message...")
-                fallback_msg = f"{caption}\n\nView your image: {image_url}"
-                return self.send_text_message(to_number, fallback_msg)
+                # Don't send URL to user - just return failure
+                return False
 
         except Exception as e:
             self.logger.error("=" * 80)
             self.logger.error("❌ EXCEPTION WHILE SENDING IMAGE")
             self.logger.error("=" * 80)
             self.logger.error(f"Exception: {str(e)}", exc_info=True)
-            # Fallback to text message
-            try:
-                self.logger.info("🔄 Attempting fallback: sending image URL as text message...")
-                fallback_msg = f"{caption}\n\nView your image: {image_url}"
-                return self.send_text_message(to_number, fallback_msg)
-            except:
-                return False
+            # Don't send URL to user - just return failure
+            return False
 
 # Initialize 11za client
 elevenza_client = ElevenzaWhatsAppClient()
@@ -867,10 +860,10 @@ def handle_message(message: dict, sender_number: str):
                             logger.info(f"Auto-resetting session for {sender_number} after result")
                             reset_user_session(sender_number)
                         else:
-                            # If image sending failed, send as text with link
+                            # If image sending failed, send error message without URL
                             elevenza_client.send_text_message(
                                 sender_number,
-                                f"Your try-on is ready! View it here: {result_url}\n\nWant to try more? Send 'start'!"
+                                "Sorry, we couldn't send your result image. Please try again by sending 'start'."
                             )
                             reset_user_session(sender_number)
                     else:
