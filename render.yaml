@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: fashioncore-11za
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python fashioncore_11za.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: ELEVENZA_API_URL
+        value: https://app.11za.in/apis/template/sendTemplate
+      - key: ELEVENZA_ORIGIN
+        value: https://rangshrii.com/
+      - key: ELEVENZA_AUTH_TOKEN
+        sync: false
+      - key: ELEVENZA_PHONE_NUMBER
+        value: 917405991551
+      - key: KLING_ACCESS_KEY
+        value: ALMrJQFypk3HCYMnkNNfa8NJCB9YPeP
+      - key: KLING_SECRET_KEY
+        value: pNYB39FT3kbGEtaCCM3Qr8PkHHBppdC
+      - key: VERIFY_TOKEN
+        value: "1122"
+      - key: TEST_MODE
+        value: "True"
+      - key: PORT
+        value: 8080
